@@ -1,20 +1,23 @@
 /* ══════════════════════════════════════════════
    CSS VARIABLES — dark (default) / light
 
-   GitAgent's palette and structure, value for value: MiniCRM is meant to sit
-   beside it and read as the same family. Green is also what the cockpit
-   counts: a priority that is done.
+   Violet is MiniCRM's own colour: no other mayorana desktop app uses it (green,
+   teal, amber, blue and red are taken), so its window is recognisable at a
+   glance. Surfaces are tinted the same hue. Green stays what the cockpit
+   counts, a priority that is done, and is not the accent.
 ══════════════════════════════════════════════ */
 :root {
-    --bg0:       #0a1410;
-    --bg1:       #12211b;
-    --bg2:       #1b3128;
-    --bg3:       #172a22;
-    --border:    #2a4a3c;
-    --border2:   #1b3128;
-    --text1:     #d6f0e2;
-    --text2:     #8fb8a4;
-    --text3:     #5f8a74;
+    --bg0:       #100d1c;
+    --bg1:       #181429;
+    --bg2:       #231d3b;
+    --bg3:       #1e1934;
+    --border:    #3a3060;
+    --border2:   #231d3b;
+    --text1:     #e6e0f7;
+    --text2:     #a99fd0;
+    --text3:     #9084bd;
+    --accent:    #a78bfa;
+    --accent-bg: #6d4fd6;
     --green:     #4ac98a;
     --green-bg:  #1f9d61;
     --red:       #ff6b6b;
@@ -34,19 +37,21 @@ body {
     --kit-hover: var(--bg2);
     --kit-text: var(--text1);
     --kit-muted: var(--text3);
-    --kit-accent: var(--green);
+    --kit-accent: var(--accent);
 }
 
 body.light {
-    --bg0:       #f5faf7;
-    --bg1:       #e9f2ec;
-    --bg2:       #dae8e0;
-    --bg3:       #cfe0d6;
-    --border:    #bcd4c6;
-    --border2:   #dae8e0;
-    --text1:     #1d3a2c;
-    --text2:     #40614f;
-    --text3:     #5f8070;
+    --bg0:       #f7f5fd;
+    --bg1:       #edeaf9;
+    --bg2:       #e1dcf4;
+    --bg3:       #d6d0ee;
+    --border:    #c6bde6;
+    --border2:   #e1dcf4;
+    --text1:     #271f4a;
+    --text2:     #4b4177;
+    --text3:     #5f5588;
+    --accent:    #5b3fc4;
+    --accent-bg: #5b3fc4;
     --green:     #1a7f4b;
     --green-bg:  #177243;
     --red:       #c93a3a;
@@ -83,10 +88,10 @@ body {
     white-space: nowrap;
     transition: background 0.12s, border-color 0.12s;
 }
-.btn:hover:not(:disabled) { background: var(--bg3); border-color: var(--green); }
+.btn:hover:not(:disabled) { background: var(--bg3); border-color: var(--accent); }
 .btn:disabled { opacity: 0.5; cursor: default; }
-.btn-primary { background: var(--green-bg); border-color: var(--green-bg); color: #fff; }
-.btn-primary:hover:not(:disabled) { background: var(--green); border-color: var(--green); }
+.btn-primary { background: var(--accent-bg); border-color: var(--accent-bg); color: #fff; }
+.btn-primary:hover:not(:disabled) { background: var(--accent); border-color: var(--accent); }
 .btn-danger { background: transparent; border-color: var(--red); color: var(--red); }
 .btn-danger:hover:not(:disabled) { background: var(--red-bg); border-color: var(--red-bg); color: #fff; }
 
@@ -118,7 +123,7 @@ body {
     cursor: pointer;
 }
 .sidebar-row:hover { background: var(--bg2); }
-.sidebar-row-on { background: var(--bg2); border-left-color: var(--green); }
+.sidebar-row-on { background: var(--bg2); border-left-color: var(--accent); }
 .sidebar-main { flex: 1; min-width: 0; }
 .sidebar-label { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .sidebar-sub {
@@ -147,7 +152,7 @@ body {
     font-size: 11px; font-weight: 600;
 }
 .sidebar-row-on .step-num, .step-row:hover .step-num {
-    border-color: var(--green); color: var(--green);
+    border-color: var(--accent); color: var(--accent);
 }
 
 /* ── The open table ───────────────────────────────────────────────── */
@@ -180,7 +185,7 @@ body {
     background: var(--bg1); color: var(--text1);
     border: 1px solid var(--border); border-radius: 7px;
 }
-.search:focus { outline: none; border-color: var(--green); }
+.search:focus { outline: none; border-color: var(--accent); }
 .search::placeholder { color: var(--text3); }
 
 .filters {
@@ -202,8 +207,8 @@ body {
     border: 1px solid var(--border2); cursor: pointer;
     transition: border-color 0.12s, color 0.12s;
 }
-.chip:hover { border-color: var(--green); color: var(--text1); }
-.chip-on { background: var(--bg2); border-color: var(--green); color: var(--text1); }
+.chip:hover { border-color: var(--accent); color: var(--text1); }
+.chip-on { background: var(--bg2); border-color: var(--accent); color: var(--text1); }
 .chip-count { font-size: 10px; color: var(--text3); font-variant-numeric: tabular-nums; }
 
 /* The grid scrolls both ways inside the column; its header row stays put,
@@ -232,7 +237,7 @@ body {
     cursor: pointer; user-select: none; -webkit-user-select: none;
 }
 .grid th:hover { color: var(--text1); }
-.sort-mark { margin-left: 6px; color: var(--green); font-size: 8px; }
+.sort-mark { margin-left: 6px; color: var(--accent); font-size: 8px; }
 
 .grid td {
     padding: 10px 12px;
@@ -243,7 +248,7 @@ body {
 .row { cursor: pointer; }
 .row:hover td { background: var(--bg1); }
 .row-on td, .row-on:hover td { background: var(--bg2); }
-.row-on td:first-child { box-shadow: inset 3px 0 0 var(--green); }
+.row-on td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
 /* The column that names the line reads first. */
 .grid td:not(.col-extra):not(.w-narrow):not(.w-medium) { color: var(--text1); }
 .clamp {
@@ -257,7 +262,7 @@ body {
     color: inherit; font: inherit; text-align: left;
     cursor: pointer;
 }
-.row-open:focus-visible { outline: 1px solid var(--green); outline-offset: 3px; }
+.row-open:focus-visible { outline: 1px solid var(--accent); outline-offset: 3px; }
 .cell-date { font-variant-numeric: tabular-nums; white-space: nowrap; }
 .cell-empty { color: var(--text3); font-style: italic; }
 
@@ -321,7 +326,7 @@ body {
     border: 1px solid var(--border); border-radius: 6px;
 }
 .field textarea { resize: vertical; min-height: 68px; field-sizing: content; }
-.field input:focus, .field textarea:focus { outline: none; border-color: var(--green); }
+.field input:focus, .field textarea:focus { outline: none; border-color: var(--accent); }
 .field-short input { width: 170px; }
 
 .choices { display: flex; flex-wrap: wrap; gap: 6px; }
@@ -332,7 +337,7 @@ body {
     border: 1px solid var(--border); cursor: pointer;
     transition: border-color 0.12s, color 0.12s;
 }
-.choice:hover { border-color: var(--green); color: var(--text1); }
+.choice:hover { border-color: var(--accent); color: var(--text1); }
 .choice-on {
     --tone: var(--text1);
     color: var(--tone); font-weight: 600;
@@ -356,7 +361,7 @@ body {
     background: var(--bg0);
 }
 .guide-card { width: 100%; max-width: 620px; height: max-content; }
-.guide-card h1 { font-size: 28px; font-weight: 700; color: var(--green); letter-spacing: -0.5px; }
+.guide-card h1 { font-size: 28px; font-weight: 700; color: var(--accent); letter-spacing: -0.5px; }
 .guide-card .subtitle { margin-top: 8px; font-size: 13px; color: var(--text2); line-height: 1.7; }
 .guide-text { margin-top: 12px; font-size: 12px; color: var(--text3); line-height: 1.8; }
 .guide-hint {
@@ -401,11 +406,11 @@ body {
 .step-label { font-size: 13px; font-weight: 600; }
 .step-sub { margin-top: 2px; font-size: 11px; color: var(--text3); }
 .step-open { font-size: 11px; color: var(--text3); white-space: nowrap; transition: color 0.12s; }
-.step-row:hover .step-open { color: var(--green); }
+.step-row:hover .step-open { color: var(--accent); }
 
 .guide-reassure {
     margin-top: 28px; padding-left: 14px;
-    border-left: 3px solid var(--green);
+    border-left: 3px solid var(--accent);
     font-size: 13px; color: var(--text1); line-height: 1.7;
 }
 .guide-note { margin-top: 16px; font-size: 11.5px; color: var(--text3); line-height: 1.8; }

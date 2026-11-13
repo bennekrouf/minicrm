@@ -1,0 +1,43 @@
+name: Release
+
+# Builds signed macOS/Windows/Linux artifacts, publishes them to mayorana.ch,
+# and creates a GitHub Release carrying the notes and latest.json only. The
+# jobs live in desktop-kit, shared by every desktop app: change them there,
+# not here.
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+  # ── Manual trigger from the GitHub Actions UI ──────────────────────────────
+  # Actions → Release → Run workflow. Leave the version empty to auto-bump.
+  # Bumps Cargo.toml + Cargo.lock, stamps CHANGELOG.md, commits, tags and
+  # pushes — then builds that tag in this same run.
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to release (e.g. 0.2.0) — empty = auto-bump'
+        required: false
+        default: ''
+      bump:
+        description: 'Bump type if version is empty'
+        required: false
+        default: 'patch'
+        type: choice
+        options: [patch, minor, major]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    uses: bennekrouf/desktop-kit/.github/workflows/app-release.yml@main
+    secrets: inherit
+    with:
+      app: minicrm
+      app-name: MiniCRM
+      bundle-id: ch.mayorana.minicrm
+      mac-category: public.app-category.productivity
+      version: ${{ inputs.version }}
+      bump: ${{ inputs.bump || 'patch' }}
