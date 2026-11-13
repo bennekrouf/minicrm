@@ -1,0 +1,21 @@
+name: CI
+
+# Fast feedback on every pull request. The jobs live in desktop-kit, shared by
+# every desktop app: change them there, not here.
+#
+# Not on push to main: the PR run already tested that code, and the Release
+# run on the tag builds it again. Every PR runs it, docs too: main requires
+# these checks, and a check that never starts would hold a PR forever.
+on:
+  pull_request:
+
+# A newer push on the same ref cancels the run it superseded.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  ci:
+    uses: bennekrouf/desktop-kit/.github/workflows/app-ci.yml@main
+    with:
+      package: minicrm
