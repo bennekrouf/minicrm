@@ -1,0 +1,411 @@
+/* ══════════════════════════════════════════════
+   CSS VARIABLES — dark (default) / light
+
+   GitAgent's palette and structure, value for value: MiniCRM is meant to sit
+   beside it and read as the same family. Green is also what the cockpit
+   counts: a priority that is done.
+══════════════════════════════════════════════ */
+:root {
+    --bg0:       #0a1410;
+    --bg1:       #12211b;
+    --bg2:       #1b3128;
+    --bg3:       #172a22;
+    --border:    #2a4a3c;
+    --border2:   #1b3128;
+    --text1:     #d6f0e2;
+    --text2:     #8fb8a4;
+    --text3:     #5f8a74;
+    --green:     #4ac98a;
+    --green-bg:  #1f9d61;
+    --red:       #ff6b6b;
+    --red-bg:    #c93a3a;
+    --blue:      #4fa3ff;
+    --yellow:    #e0b342;
+    --mono: 'SF Mono', 'Menlo', 'Monaco', 'Cascadia Code', 'Fira Code', 'Consolas', monospace;
+    /* Native controls (the date picker, scrollbars) follow the theme. */
+    color-scheme: dark;
+}
+
+/* The shared header's colours (desktop-kit). On body, so body.light below
+   changes them too. */
+body {
+    --kit-bar: var(--bg1);
+    --kit-line: var(--border);
+    --kit-hover: var(--bg2);
+    --kit-text: var(--text1);
+    --kit-muted: var(--text3);
+    --kit-accent: var(--green);
+}
+
+body.light {
+    --bg0:       #f5faf7;
+    --bg1:       #e9f2ec;
+    --bg2:       #dae8e0;
+    --bg3:       #cfe0d6;
+    --border:    #bcd4c6;
+    --border2:   #dae8e0;
+    --text1:     #1d3a2c;
+    --text2:     #40614f;
+    --text3:     #5f8070;
+    --green:     #1a7f4b;
+    --green-bg:  #177243;
+    --red:       #c93a3a;
+    --red-bg:    #b23131;
+    --blue:      #1e5fb8;
+    --yellow:    #8a6210;
+    color-scheme: light;
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+/* Form controls do not inherit type by default; keep them in the shared stack. */
+input, button, textarea, select { font-family: inherit; }
+
+body {
+    font-family: var(--mono);
+    font-size: 13px;
+    background: var(--bg0);
+    color: var(--text1);
+    overflow: hidden;
+    height: 100vh;
+}
+
+/* ── Buttons ──────────────────────────────────────────────────────── */
+.btn {
+    font-family: var(--mono);
+    font-size: 12px;
+    padding: 7px 14px;
+    border-radius: 7px;
+    border: 1px solid var(--border);
+    background: var(--bg2);
+    color: var(--text1);
+    cursor: pointer;
+    white-space: nowrap;
+    transition: background 0.12s, border-color 0.12s;
+}
+.btn:hover:not(:disabled) { background: var(--bg3); border-color: var(--green); }
+.btn:disabled { opacity: 0.5; cursor: default; }
+.btn-primary { background: var(--green-bg); border-color: var(--green-bg); color: #fff; }
+.btn-primary:hover:not(:disabled) { background: var(--green); border-color: var(--green); }
+.btn-danger { background: transparent; border-color: var(--red); color: var(--red); }
+.btn-danger:hover:not(:disabled) { background: var(--red-bg); border-color: var(--red-bg); color: #fff; }
+
+/* ══════════════════════════════════════════════
+   WINDOW — sidebar, the open page, the editor
+══════════════════════════════════════════════ */
+.body { display: flex; height: calc(100vh - var(--kit-header-h)); min-height: 0; }
+
+/* ── Sidebar: the cockpit's pages ─────────────────────────────────── */
+.sidebar {
+    width: 292px; flex-shrink: 0;
+    display: flex; flex-direction: column;
+    border-right: 1px solid var(--border);
+    background: var(--bg1);
+    min-height: 0;
+}
+.sidebar-head { padding: 12px 14px 8px; }
+.sidebar-title {
+    font-size: 10px; color: var(--text3);
+    text-transform: uppercase; letter-spacing: 0.6px;
+}
+.sidebar-list { flex: 1; overflow-y: auto; padding: 0 6px; }
+.sidebar-row {
+    display: flex; align-items: center; gap: 10px;
+    width: 100%; padding: 9px 8px; margin-bottom: 2px;
+    background: transparent; border: 0; border-left: 3px solid transparent;
+    border-radius: 6px;
+    color: var(--text1); font-size: 13px; text-align: left;
+    cursor: pointer;
+}
+.sidebar-row:hover { background: var(--bg2); }
+.sidebar-row-on { background: var(--bg2); border-left-color: var(--green); }
+.sidebar-main { flex: 1; min-width: 0; }
+.sidebar-label { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sidebar-sub {
+    margin-top: 2px; font-size: 10.5px; color: var(--text3);
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.sidebar-count {
+    font-size: 10px; padding: 1px 7px; border-radius: 999px;
+    background: var(--bg3); color: var(--text2);
+    border: 1px solid var(--border);
+    font-variant-numeric: tabular-nums;
+}
+.sidebar-foot {
+    padding: 10px 14px; font-size: 10.5px; color: var(--text3);
+    border-top: 1px solid var(--border2);
+}
+
+/* The step of the weekly routine a page belongs to: in the sidebar and on
+   the guide. */
+.step-num {
+    flex-shrink: 0;
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 22px; height: 22px; border-radius: 50%;
+    border: 1px solid var(--border);
+    background: var(--bg0); color: var(--text2);
+    font-size: 11px; font-weight: 600;
+}
+.sidebar-row-on .step-num, .step-row:hover .step-num {
+    border-color: var(--green); color: var(--green);
+}
+
+/* ── The open table ───────────────────────────────────────────────── */
+.main-col {
+    flex: 1; min-width: 0; min-height: 0;
+    display: flex; flex-direction: column;
+    background: var(--bg0);
+}
+.col-head {
+    display: flex; align-items: center; gap: 10px;
+    padding: 11px 14px;
+    border-bottom: 1px solid var(--border2);
+    flex-shrink: 0;
+}
+.col-head-main { flex: 1; min-width: 0; }
+.col-title {
+    font-size: 14px; font-weight: 600;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.col-sub {
+    margin-top: 2px; font-size: 11px; color: var(--text3);
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.col-head > .btn, .col-head > button { flex-shrink: 0; }
+
+.search {
+    width: 200px; flex-shrink: 1; min-width: 90px;
+    font-family: var(--mono); font-size: 12px;
+    padding: 7px 10px;
+    background: var(--bg1); color: var(--text1);
+    border: 1px solid var(--border); border-radius: 7px;
+}
+.search:focus { outline: none; border-color: var(--green); }
+.search::placeholder { color: var(--text3); }
+
+.filters {
+    display: flex; align-items: center; flex-wrap: wrap; gap: 6px;
+    padding: 8px 14px;
+    border-bottom: 1px solid var(--border2);
+    flex-shrink: 0;
+}
+.filters-label {
+    margin-right: 4px; font-size: 10px; color: var(--text3);
+    text-transform: uppercase; letter-spacing: 0.5px;
+}
+.filters-shown { margin-left: auto; font-size: 11px; color: var(--text3); font-variant-numeric: tabular-nums; }
+.chip {
+    display: inline-flex; align-items: center; gap: 6px;
+    font-family: var(--mono); font-size: 11px;
+    padding: 4px 10px; border-radius: 999px;
+    background: var(--bg1); color: var(--text2);
+    border: 1px solid var(--border2); cursor: pointer;
+    transition: border-color 0.12s, color 0.12s;
+}
+.chip:hover { border-color: var(--green); color: var(--text1); }
+.chip-on { background: var(--bg2); border-color: var(--green); color: var(--text1); }
+.chip-count { font-size: 10px; color: var(--text3); font-variant-numeric: tabular-nums; }
+
+/* The grid scrolls both ways inside the column; its header row stays put,
+   as a frozen first row does in a spreadsheet. */
+.grid-scroll { flex: 1; min-height: 0; overflow: auto; }
+.grid {
+    width: 100%; min-width: 960px;
+    border-collapse: separate; border-spacing: 0;
+    table-layout: fixed;
+}
+/* With the editor open beside it, the grid keeps the columns that name a
+   line; the rest are read in the editor. */
+.grid-compact { min-width: 0; }
+.grid-compact .col-extra { display: none; }
+.grid .w-narrow { width: 116px; }
+.grid .w-medium { width: 168px; }
+
+.grid th {
+    position: sticky; top: 0; z-index: 1;
+    padding: 9px 12px;
+    background: var(--bg1);
+    border-bottom: 1px solid var(--border);
+    font-size: 10px; font-weight: 500; color: var(--text3);
+    text-transform: uppercase; letter-spacing: 0.5px; text-align: left;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    cursor: pointer; user-select: none; -webkit-user-select: none;
+}
+.grid th:hover { color: var(--text1); }
+.sort-mark { margin-left: 6px; color: var(--green); font-size: 8px; }
+
+.grid td {
+    padding: 10px 12px;
+    border-bottom: 1px solid var(--border2);
+    font-size: 12px; line-height: 1.55; color: var(--text2);
+    vertical-align: top;
+}
+.row { cursor: pointer; }
+.row:hover td { background: var(--bg1); }
+.row-on td, .row-on:hover td { background: var(--bg2); }
+.row-on td:first-child { box-shadow: inset 3px 0 0 var(--green); }
+/* The column that names the line reads first. */
+.grid td:not(.col-extra):not(.w-narrow):not(.w-medium) { color: var(--text1); }
+.clamp {
+    display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3;
+    overflow: hidden; overflow-wrap: anywhere;
+}
+/* The line's name, as the button that opens it: plain text to the eye. */
+.row-open {
+    display: block; width: 100%;
+    background: none; border: 0; border-radius: 4px;
+    color: inherit; font: inherit; text-align: left;
+    cursor: pointer;
+}
+.row-open:focus-visible { outline: 1px solid var(--green); outline-offset: 3px; }
+.cell-date { font-variant-numeric: tabular-nums; white-space: nowrap; }
+.cell-empty { color: var(--text3); font-style: italic; }
+
+/* ── Status pills: neutral, soft, green, amber, red ───────────────── */
+.pill {
+    display: inline-block; max-width: 100%;
+    font-size: 10px; line-height: 1.5; padding: 2px 9px; border-radius: 999px;
+    text-transform: uppercase; letter-spacing: 0.4px;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis; vertical-align: top;
+    --tone: var(--text2);
+    color: var(--tone);
+    background: color-mix(in srgb, var(--tone) 14%, transparent);
+    border: 1px solid color-mix(in srgb, var(--tone) 40%, transparent);
+}
+.pill-soft { --tone: var(--blue); }
+.pill-good { --tone: var(--green); }
+.pill-warn { --tone: var(--yellow); }
+.pill-bad  { --tone: var(--red); }
+
+.placeholder {
+    flex: 1; display: flex; flex-direction: column;
+    align-items: center; justify-content: center;
+    gap: 10px; padding: 40px; text-align: center;
+}
+.placeholder-title { font-size: 15px; color: var(--text2); }
+.placeholder-sub { font-size: 12px; color: var(--text3); max-width: 400px; line-height: 1.7; }
+.placeholder .btn { margin-top: 6px; }
+
+/* ── The editor of one line ───────────────────────────────────────── */
+.detail-col {
+    width: 420px; flex-shrink: 0; min-height: 0;
+    display: flex; flex-direction: column;
+    border-left: 1px solid var(--border);
+    background: var(--bg1);
+}
+.detail-close {
+    background: none; border: none; color: var(--text3);
+    font-size: 20px; line-height: 1; padding: 0 4px; cursor: pointer;
+}
+.detail-close:hover { color: var(--text1); }
+.detail-body {
+    flex: 1; min-height: 0; overflow-y: auto;
+    padding: 16px 16px 20px;
+    display: flex; flex-direction: column; gap: 14px;
+}
+.detail-actions {
+    flex-shrink: 0;
+    display: flex; align-items: center; gap: 9px; flex-wrap: wrap;
+    padding: 11px 16px;
+    border-top: 1px solid var(--border2);
+}
+.detail-gap { flex: 1; }
+.detail-ask { flex: 1; font-size: 12px; color: var(--text2); }
+
+.field { display: flex; flex-direction: column; gap: 5px; }
+.field > span { font-size: 10.5px; color: var(--text3); text-transform: uppercase; letter-spacing: 0.5px; }
+.field input, .field textarea {
+    font-family: var(--mono); font-size: 12px; line-height: 1.55;
+    padding: 8px 10px;
+    background: var(--bg0); color: var(--text1);
+    border: 1px solid var(--border); border-radius: 6px;
+}
+.field textarea { resize: vertical; min-height: 68px; field-sizing: content; }
+.field input:focus, .field textarea:focus { outline: none; border-color: var(--green); }
+.field-short input { width: 170px; }
+
+.choices { display: flex; flex-wrap: wrap; gap: 6px; }
+.choice {
+    font-family: var(--mono); font-size: 11px;
+    padding: 5px 11px; border-radius: 999px;
+    background: var(--bg0); color: var(--text2);
+    border: 1px solid var(--border); cursor: pointer;
+    transition: border-color 0.12s, color 0.12s;
+}
+.choice:hover { border-color: var(--green); color: var(--text1); }
+.choice-on {
+    --tone: var(--text1);
+    color: var(--tone); font-weight: 600;
+    border-color: var(--tone);
+    background: color-mix(in srgb, var(--tone) 16%, transparent);
+}
+.choice-on.choice-neutral { --tone: var(--text1); }
+.choice-on.choice-soft { --tone: var(--blue); }
+.choice-on.choice-good { --tone: var(--green); }
+.choice-on.choice-warn { --tone: var(--yellow); }
+.choice-on.choice-bad  { --tone: var(--red); }
+.choice-on:hover { border-color: var(--tone); color: var(--tone); }
+
+/* ══════════════════════════════════════════════
+   HOW IT WORKS
+══════════════════════════════════════════════ */
+.guide {
+    flex: 1; min-width: 0; overflow-y: auto;
+    display: flex; justify-content: center;
+    padding: 44px 24px 56px;
+    background: var(--bg0);
+}
+.guide-card { width: 100%; max-width: 620px; height: max-content; }
+.guide-card h1 { font-size: 28px; font-weight: 700; color: var(--green); letter-spacing: -0.5px; }
+.guide-card .subtitle { margin-top: 8px; font-size: 13px; color: var(--text2); line-height: 1.7; }
+.guide-text { margin-top: 12px; font-size: 12px; color: var(--text3); line-height: 1.8; }
+.guide-hint {
+    margin: 28px 0 9px;
+    font-size: 11px; color: var(--text3);
+    text-transform: uppercase; letter-spacing: 0.5px;
+}
+
+.recap { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
+.recap-tile {
+    display: flex; flex-direction: column; align-items: flex-start; gap: 4px;
+    padding: 14px 16px;
+    background: var(--bg1);
+    border: 1px solid var(--border2); border-left: 3px solid var(--tone);
+    border-radius: 8px;
+    text-align: left; cursor: pointer;
+    transition: border-color 0.12s, background 0.12s;
+    --tone: var(--text3);
+}
+.recap-tile:hover { background: var(--bg2); border-color: var(--tone); }
+.recap-soft { --tone: var(--blue); }
+.recap-good { --tone: var(--green); }
+.recap-bad  { --tone: var(--red); }
+.recap-count { font-size: 26px; font-weight: 700; color: var(--tone); font-variant-numeric: tabular-nums; line-height: 1.1; }
+.recap-label { font-size: 11px; color: var(--text2); text-transform: uppercase; letter-spacing: 0.5px; }
+
+.steps {
+    background: var(--bg1);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    overflow: hidden;
+}
+.step-row {
+    display: flex; align-items: center; gap: 12px;
+    width: 100%; padding: 13px 16px;
+    background: transparent; border: 0; border-bottom: 1px solid var(--border2);
+    color: var(--text1); text-align: left; cursor: pointer;
+}
+.step-row:last-child { border-bottom: 0; }
+.step-row:hover { background: var(--bg2); }
+.step-main { flex: 1; min-width: 0; }
+.step-label { font-size: 13px; font-weight: 600; }
+.step-sub { margin-top: 2px; font-size: 11px; color: var(--text3); }
+.step-open { font-size: 11px; color: var(--text3); white-space: nowrap; transition: color 0.12s; }
+.step-row:hover .step-open { color: var(--green); }
+
+.guide-reassure {
+    margin-top: 28px; padding-left: 14px;
+    border-left: 3px solid var(--green);
+    font-size: 13px; color: var(--text1); line-height: 1.7;
+}
+.guide-note { margin-top: 16px; font-size: 11.5px; color: var(--text3); line-height: 1.8; }

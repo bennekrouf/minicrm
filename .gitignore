@@ -1,0 +1,5 @@
+/target
+/.dx
+
+# Generated from assets/icon.png for the Windows build.
+/assets/icon.ico

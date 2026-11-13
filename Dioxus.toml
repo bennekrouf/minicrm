@@ -1,0 +1,11 @@
+[application]
+name = "minicrm"
+default_platform = "desktop"
+
+[desktop]
+title = "MiniCRM"
+
+[bundle]
+identifier = "ch.mayorana.minicrm"
+publisher = "Mayorana"
+icon = ["assets/icon.png"]

@@ -1,0 +1,5 @@
+# Link the MSVC C runtime statically on Windows, as the other desktop apps do. With the default
+# dynamic CRT, minicrm.exe imports VCRUNTIME140.dll and fails to start on any PC without the
+# Visual C++ Redistributable. The cc crate follows this flag, so C dependencies build with /MT too.
+[target.x86_64-pc-windows-msvc]
+rustflags = ["-C", "target-feature=+crt-static"]

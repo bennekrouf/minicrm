@@ -1,0 +1,38 @@
+[package]
+name = "minicrm"
+version = "0.1.0"
+edition = "2021"
+description = "A weekly cockpit for someone starting a business: priorities, field actions, weak signals and open questions"
+publish = false
+
+[dependencies]
+dioxus = { version = "=0.7.10", features = ["desktop"] }
+# What every mayorana desktop app shares: the header, Settings, the update
+# check and the notice. Beside this repository, as for the other apps.
+desktop-kit = { path = "../desktop-kit", features = ["ui"] }
+# desktop-kit asks each app for its own HTTP call (see kit.rs).
+reqwest = { version = "0.12", features = ["json"] }
+tokio = { version = "1", features = ["full"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+# Today's date and week number for a new line.
+chrono = "0.4"
+dirs = "5"
+# Decodes assets/icon.png into the runtime window icon; png is the only
+# format needed.
+image = { version = "0.25", default-features = false, features = ["png"] }
+
+[target.'cfg(windows)'.build-dependencies]
+winresource = "0.1"
+
+[dev-dependencies]
+# Renders a component to HTML in tests, the way desktop-kit tests its header.
+dioxus-ssr = "=0.7.10"
+
+[lints.clippy]
+# The same lints in every desktop app. A panic is a crash the user sees, so unwrap and expect
+# are refused outside tests, as is unsafe code without a SAFETY comment. Where one is right
+# (a constant that cannot fail), allow it on that item and say why.
+unwrap_used = "deny"
+expect_used = "deny"
+undocumented_unsafe_blocks = "deny"
