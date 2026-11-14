@@ -1,7 +1,12 @@
 //! Where the cockpit is kept: one JSON file in the app's data folder,
 //! written again after every change.
+//!
+//! The window and `minicrm mcp` both write it. Each remembers what it last
+//! read or wrote, so the window can tell when the other changed the file
+//! and load it ([`changed_on_disk`]).
 
 use std::path::{Path, PathBuf};
+use std::sync::Mutex;
 
 use chrono::NaiveDate;
 
@@ -25,13 +30,43 @@ pub fn file() -> PathBuf {
     data_dir().join(FILE)
 }
 
+/// The file as this process last read or wrote it.
+static KNOWN: Mutex<Option<String>> = Mutex::new(None);
+
+fn remember(cockpit: &Cockpit) {
+    if let (Ok(mut known), Ok(json)) = (KNOWN.lock(), serde_json::to_string_pretty(cockpit)) {
+        *known = Some(json);
+    }
+}
+
 /// The saved cockpit; the examples on a first launch.
 pub fn load() -> Cockpit {
-    load_from(&data_dir(), chrono::Local::now().date_naive())
+    let cockpit = load_from(&data_dir(), chrono::Local::now().date_naive());
+    remember(&cockpit);
+    cockpit
 }
 
 pub fn save(cockpit: &Cockpit) {
     save_to(&data_dir(), cockpit);
+    remember(cockpit);
+}
+
+/// The cockpit, when another process (`minicrm mcp`) has written the file
+/// since this one last read or wrote it. None when it is as this process
+/// left it, missing, or unreadable.
+pub fn changed_on_disk() -> Option<Cockpit> {
+    changed_at(&file())
+}
+
+fn changed_at(path: &Path) -> Option<Cockpit> {
+    let content = std::fs::read_to_string(path).ok()?;
+    let mut known = KNOWN.lock().ok()?;
+    if known.as_deref() == Some(content.as_str()) {
+        return None;
+    }
+    let cockpit = serde_json::from_str(&content).ok()?;
+    *known = Some(content);
+    Some(cockpit)
 }
 
 fn load_from(dir: &Path, today: NaiveDate) -> Cockpit {
@@ -103,6 +138,33 @@ mod tests {
         let dir = folder("empty");
         save_to(&dir, &Cockpit::default());
         assert_eq!(load_from(&dir, today()), Cockpit::default());
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// The only test that touches what this process remembers, so tests
+    /// running side by side cannot disturb it.
+    #[test]
+    fn a_change_made_by_the_other_process_is_noticed_once() {
+        let dir = folder("watch");
+        let path = dir.join(FILE);
+        let mut cockpit = seed::examples(today());
+        save_to(&dir, &cockpit);
+        remember(&cockpit);
+        assert_eq!(changed_at(&path), None, "as this process left it");
+
+        // `minicrm mcp` adds a contact and writes the file.
+        let mut theirs = cockpit.clone();
+        theirs.add_with(Sheet::Contacts, &[("name", "Ada")]);
+        save_to(&dir, &theirs);
+        assert_eq!(changed_at(&path), Some(theirs.clone()));
+        assert_eq!(changed_at(&path), None, "already loaded");
+
+        // The window's own next save is not taken for someone else's.
+        cockpit = theirs;
+        cockpit.add(Sheet::Goals, today());
+        save_to(&dir, &cockpit);
+        remember(&cockpit);
+        assert_eq!(changed_at(&path), None);
         std::fs::remove_dir_all(&dir).unwrap();
     }
 

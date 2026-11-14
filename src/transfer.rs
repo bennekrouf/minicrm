@@ -290,7 +290,7 @@ fn clean(cockpit: &Cockpit, column: &Column, value: &str) -> String {
 
 /// A day written the way a spreadsheet or LinkedIn writes it. Day first
 /// where it could be either, as MiniCRM shows days.
-fn read_day(value: &str) -> Option<NaiveDate> {
+pub fn read_day(value: &str) -> Option<NaiveDate> {
     ["%Y-%m-%d", "%d %b %Y", "%d/%m/%Y", "%d.%m.%Y", "%Y/%m/%d"]
         .iter()
         .find_map(|format| NaiveDate::parse_from_str(value, format).ok())

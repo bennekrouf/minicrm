@@ -8,12 +8,13 @@
 
 mod components;
 mod kit;
+mod mcp;
 mod model;
 mod seed;
 mod store;
 mod transfer;
 
-use desktop_kit::ui::{use_theme, Banners, Header, SettingsWindow};
+use desktop_kit::ui::{use_theme, Banners, ConnectWindow, Header, SettingsWindow};
 use dioxus::desktop::LogicalSize;
 use dioxus::prelude::*;
 
@@ -28,6 +29,10 @@ fn window_title() -> String {
 
 fn main() {
     kit::init();
+    // `minicrm mcp`: the cockpit over stdio for an MCP client, and no window.
+    if std::env::args().nth(1).as_deref() == Some("mcp") {
+        return mcp::serve();
+    }
 
     // The stylesheet goes into the page head once: a `style` element inside
     // `App` would be diffed again on every keystroke.
@@ -71,15 +76,41 @@ fn App() -> Element {
     let cockpit = use_context_provider(|| Signal::new(store::load()));
     use_context_provider(Ui::new);
     use_effect(move || store::save(&cockpit.read()));
+    // What Claude changes through `minicrm mcp` shows up here within moments.
+    use_future(move || async move {
+        loop {
+            tokio::time::sleep(std::time::Duration::from_millis(1500)).await;
+            if let Some(fresh) = store::changed_on_disk() {
+                let mut cockpit = cockpit;
+                cockpit.set(fresh);
+            }
+        }
+    });
 
     let theme = use_theme();
     let mut settings_open = use_signal(|| false);
+    let mut connect_open = use_signal(|| false);
 
     rsx! {
         // A newer release and the notice from mayorana.ch. No usage
         // statistics: MiniCRM keeps none.
         Banners {}
-        Header { on_settings: move |_| settings_open.set(true) }
+        Header {
+            on_settings: move |_| settings_open.set(true),
+            on_mcp: move |_| connect_open.set(true),
+        }
+        if connect_open() {
+            ConnectWindow {
+                lead: "Ask Claude to keep your cockpit for you: log a call against a contact, move someone \
+                       along the pipeline, set the next follow-up, or import your LinkedIn connections. It \
+                       reads and writes the same file as this window, which shows each change within moments.",
+                try_it: "\u{201c}Who do I need to follow up this week?\u{201d}, or \u{201c}I just called \
+                         Karim, he wants a proposal: log it and move him on.\u{201d}",
+                caution: "Your contacts stay on this computer; only what Claude reads through these tools \
+                          goes into the conversation.",
+                on_close: move |_| connect_open.set(false),
+            }
+        }
         if settings_open() {
             SettingsWindow { theme, on_close: move |_| settings_open.set(false),
                 div { class: "kit-set-actions",

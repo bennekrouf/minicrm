@@ -374,6 +374,17 @@ impl Sheet {
             .unwrap_or(&self.columns()[0])
     }
 
+    /// Its name for a tool call or a file: `contacts`.
+    pub fn id(self) -> &'static str {
+        match self {
+            Sheet::Goals => "goals",
+            Sheet::Actions => "actions",
+            Sheet::Signals => "signals",
+            Sheet::Questions => "questions",
+            Sheet::Contacts => "contacts",
+        }
+    }
+
     /// The file an export of this table is offered as.
     pub fn file_name(self) -> &'static str {
         match self {
@@ -657,6 +668,13 @@ impl Cockpit {
     /// Every follow-up due by the end of `today`'s week, the oldest first:
     /// the contacts to get back to and the actions to follow up.
     pub fn follow_ups(&self, today: NaiveDate) -> Vec<FollowUp> {
+        self.due_by(today, end_of_week(today))
+    }
+
+    /// Every follow-up due on `until` or before, the oldest first.
+    pub fn due_by(&self, today: NaiveDate, until: NaiveDate) -> Vec<FollowUp> {
+        let until = iso(until);
+        let until = until.as_str();
         let mut due: Vec<FollowUp> = Sheet::ALL
             .into_iter()
             .filter_map(|sheet| Some((sheet, sheet.follow_up()?)))
@@ -664,7 +682,7 @@ impl Cockpit {
                 self.rows(sheet).iter().filter_map(move |row| {
                     let date = row.get(date_key);
                     let urgency = Urgency::of(date, today)?;
-                    if urgency == Urgency::Later {
+                    if date > until {
                         return None;
                     }
                     Some(FollowUp {
