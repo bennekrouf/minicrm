@@ -4,6 +4,8 @@
 use chrono::NaiveDate;
 use dioxus::prelude::*;
 
+use desktop_kit::library::{Item, Kind as MediaKind, Status};
+
 use super::*;
 use crate::model::Cockpit;
 use crate::seed;
@@ -14,6 +16,8 @@ struct At {
     selected: Option<u64>,
     filter: Option<&'static str>,
     empty: bool,
+    /// Sophie's pre-sale offer names a LinkedIn post in the media library.
+    library: bool,
 }
 
 fn at(view: View) -> At {
@@ -22,7 +26,33 @@ fn at(view: View) -> At {
         selected: None,
         filter: None,
         empty: false,
+        library: false,
     }
+}
+
+/// The LinkedIn post the pre-sale offer went out in.
+fn offer_post() -> Item {
+    let mut post = Item::new(
+        "publishkit:offer",
+        "publishkit",
+        MediaKind::Social,
+        "Pre-sale: 5 places at half price",
+        Status::Posted,
+    );
+    post.network = Some("linkedin".into());
+    post.open = "/site/social/linkedin/offer.md".into();
+    post.url = Some("https://www.linkedin.com/feed/update/1".into());
+    post.date = "2026-11-08".into();
+    post
+}
+
+fn presale(cockpit: &Cockpit) -> u64 {
+    cockpit
+        .actions
+        .iter()
+        .find(|r| r.get("action") == "Pre-sale offer sent to Sophie")
+        .unwrap()
+        .id
 }
 
 /// A Wednesday: the examples' follow-ups are one late, three due by
@@ -38,10 +68,22 @@ fn examples() -> Cockpit {
 #[allow(non_snake_case)]
 fn Harness(at: At) -> Element {
     use_context_provider(|| {
-        Signal::new(if at.empty {
+        let mut cockpit = if at.empty {
             Cockpit::default()
         } else {
             examples()
+        };
+        if at.library {
+            let id = presale(&cockpit);
+            cockpit.set(Sheet::Actions, id, "media", "publishkit:offer".into());
+        }
+        Signal::new(cockpit)
+    });
+    use_context_provider(|| {
+        Signal::new(if at.library {
+            vec![offer_post()]
+        } else {
+            Vec::new()
         })
     });
     use_context_provider(|| Ui {
@@ -242,4 +284,52 @@ fn an_empty_table_says_how_to_start() {
     assert!(html.contains("This table is empty"));
     assert!(html.contains("+ Question"));
     assert!(!html.contains("<table"));
+}
+
+#[test]
+fn an_action_shows_the_post_it_went_out_in_and_where_it_stands() {
+    let cockpit = examples();
+    let mut view = at(View::Sheet(Sheet::Actions));
+    view.library = true;
+    view.selected = Some(presale(&cockpit));
+    let html = render(view);
+    assert!(html.contains("Video or post"));
+    assert!(
+        html.contains("Pre-sale: 5 places at half price \u{b7} LinkedIn post, posted"),
+        "{html}"
+    );
+    assert!(html.contains(r#"<span class="pill pill-good">Posted</span>"#));
+    assert!(html.contains("Open in PublishKit \u{203a}"));
+    assert!(html.contains("See it online \u{203a}"));
+}
+
+#[test]
+fn a_contact_s_history_names_the_post_an_action_was_about() {
+    let cockpit = examples();
+    let mut view = at(View::Sheet(Sheet::Contacts));
+    view.library = true;
+    view.selected = Some(cockpit.contact_named("Sophie Durand").unwrap().id);
+    let html = render(view);
+    assert!(
+        html.contains("LinkedIn post: Pre-sale: 5 places at half price"),
+        "{html}"
+    );
+}
+
+#[test]
+fn with_an_empty_library_the_field_says_what_it_is_for() {
+    let cockpit = examples();
+    let mut view = at(View::Sheet(Sheet::Actions));
+    view.selected = Some(presale(&cockpit));
+    let html = render(view);
+    assert!(html.contains("What PolishCast, TrackCut and PublishKit make shows here"));
+}
+
+#[test]
+fn a_goal_names_the_video_or_post_it_is_for() {
+    let cockpit = examples();
+    let mut view = at(View::Sheet(Sheet::Goals));
+    view.selected = Some(cockpit.goals[0].id);
+    let html = render(view);
+    assert!(html.contains("Video or post"), "{html}");
 }

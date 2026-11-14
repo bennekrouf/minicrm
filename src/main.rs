@@ -3,12 +3,16 @@
 //! Each week it answers four questions, one table each: what I meant to do,
 //! what I really did, what I noticed, and what I need to clear up now. Beside
 //! them, the contacts the work is done with, where each one stands, and the
-//! follow-ups that have come round. No automation and nothing connected to
-//! other tools: a table goes in and out as a CSV file.
+//! follow-ups that have come round. The posts that go out from PublishKit
+//! are logged in Field progress on their own, and an action can name the
+//! video or post it was about, from the media library MiniCRM shares with
+//! PolishCast, TrackCut and PublishKit. A table goes in and out as a CSV
+//! file.
 
 mod components;
 mod kit;
 mod mcp;
+mod media;
 mod model;
 mod seed;
 mod store;
@@ -76,6 +80,22 @@ fn App() -> Element {
     let cockpit = use_context_provider(|| Signal::new(store::load()));
     use_context_provider(Ui::new);
     use_effect(move || store::save(&cockpit.read()));
+    // The media library PolishCast, TrackCut and PublishKit share: a post
+    // that goes out lands in Field progress, logged once, and a goal's
+    // planned video follows it once it is recorded.
+    let library = desktop_kit::ui::use_library();
+    use_context_provider(|| library);
+    use_effect(move || {
+        let items = library();
+        media::set(items.clone());
+        // On top of what Claude may have just written, not over it.
+        let mut next = store::changed_on_disk().unwrap_or_else(|| cockpit.peek().clone());
+        next.follow_library(&items, model::today());
+        if next != *cockpit.peek() {
+            let mut cockpit = cockpit;
+            cockpit.set(next);
+        }
+    });
     // What Claude changes through `minicrm mcp` shows up here within moments.
     use_future(move || async move {
         loop {
@@ -103,9 +123,10 @@ fn App() -> Element {
             ConnectWindow {
                 lead: "Ask Claude to keep your cockpit for you: log a call against a contact, move someone \
                        along the pipeline, set the next follow-up, or import your LinkedIn connections. It \
-                       reads and writes the same file as this window, which shows each change within moments.",
-                try_it: "\u{201c}Who do I need to follow up this week?\u{201d}, or \u{201c}I just called \
-                         Karim, he wants a proposal: log it and move him on.\u{201d}",
+                       reads and writes the same file as this window, which shows each change within moments, \
+                       and sees the videos and posts PolishCast, TrackCut and PublishKit made this week.",
+                try_it: "\u{201c}Who do I need to follow up this week?\u{201d}, or \u{201c}My LinkedIn post \
+                         brought in two leads, Anna and Marc: add them and note it on the post.\u{201d}",
                 caution: "Your contacts stay on this computer; only what Claude reads through these tools \
                           goes into the conversation.",
                 on_close: move |_| connect_open.set(false),

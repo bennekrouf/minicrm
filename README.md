@@ -2,8 +2,9 @@
 
 A weekly cockpit for someone starting a business and promoting it on their
 own. It answers four questions each week, one table each, and keeps the people
-the work is done with: no automation and no connection to other tools, only a
-CSV file in and out.
+the work is done with. It sits beside PolishCast, TrackCut and PublishKit,
+which make and publish the content: what goes out shows up here, so the week's
+review has the content and the people it reached in one place.
 
 | Page | The question it answers |
 | --- | --- |
@@ -39,6 +40,11 @@ that helps freelancers organise their prospecting), dated in the current week.
   column with the box, and sort by clicking a column heading.
 - A line of Field progress names its contact; a contact's editor lists what
   was done with them and logs the next action.
+- A post published from PublishKit is logged in Field progress on its own, on
+  the day it went out, once. Its **Video or post** field points at it; any
+  action or weekly goal can point at a video or post from the media library
+  the apps share, and open it in the app that made it. A goal can name one
+  that is only planned, and follows it once it is made.
 - **Import CSV** adds lines from a spreadsheet, Notion or LinkedIn's
   connections export, matching the file's headings to the table's columns.
   **Export CSV** saves a table, one column per column, contacts by name.
@@ -53,14 +59,17 @@ for Claude Desktop, Claude Code and Codex. Its tools:
 
 | Tool | What it does |
 | --- | --- |
-| `overview` | This week's priorities, contacts per stage, follow-ups due, and every table's columns |
+| `overview` | This week's priorities, contacts per stage, follow-ups due, this week's videos and posts, and every table's columns |
 | `list_lines`, `get_line` | A table's lines, filtered by stage, status or type, contact or text; a contact with what was done with them |
 | `add_line`, `update_line`, `delete_line` | Change any table, contacts by name, lists checked against their values |
 | `follow_ups`, `set_follow_up` | Who to get back to by Sunday (or within N days); set, push back or clear a follow-up |
 | `import_csv`, `export_csv` | A table in from a CSV file (LinkedIn's export included) or out to one |
 
-Each call reads `cockpit.json`, changes it, and writes it back; an open window
-notices the change and shows it.
+Each call reads `cockpit.json`, logs any post that went out since, changes it,
+and writes it back; an open window notices the change and shows it. The media
+library's own tools (`list_media`, `calendar`, `plan_media`) are PolishCast's,
+TrackCut's and PublishKit's: MiniCRM reads the library but doesn't serve them
+a second time.
 
 ## Building
 

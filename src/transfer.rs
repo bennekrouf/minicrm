@@ -269,7 +269,8 @@ fn gather(record: &[String], mapping: &[(usize, &'static str)]) -> Vec<(&'static
 }
 
 /// A cell from a file, as the column keeps it: an entry of the list as the
-/// list writes it, a day year-first, a contact by id.
+/// list writes it, a day year-first, a contact by id, a video or post by
+/// its id in the media library.
 fn clean(cockpit: &Cockpit, column: &Column, value: &str) -> String {
     let value = value.trim();
     if value.is_empty() {
@@ -284,6 +285,9 @@ fn clean(cockpit: &Cockpit, column: &Column, value: &str) -> String {
         Kind::Contact => cockpit
             .contact_named(value)
             .map_or_else(String::new, |c| c.id.to_string()),
+        // Matched by title, as the file shows it; unknown here, left out.
+        Kind::Media => crate::media::named(&crate::media::items(), value)
+            .map_or_else(|_| String::new(), |i| i.id.clone()),
         Kind::Text | Kind::Long | Kind::Week => value.to_string(),
     }
 }

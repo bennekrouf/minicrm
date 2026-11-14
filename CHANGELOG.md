@@ -38,3 +38,17 @@
   what you did with someone, set or clear follow-ups, and import or export a
   table as CSV. It asks you before deleting anything, and the window shows its
   changes within moments.
+- Posts you publish from PublishKit show up in Field progress on their own, on
+  the day they went out, so your weekly review counts your content too. Each
+  is logged once; write down what came of it. Posts from before you started
+  using this aren't added.
+- A "Video or post" field on each action, to say which video or post from
+  PolishCast, TrackCut or PublishKit it was about, such as a demo you made for
+  a client. It shows where that piece stands and opens it in the app that made
+  it, and a contact's history shows it next to the action.
+- Claude sees this week's videos and posts too, planned, scheduled or out, and
+  can tie an action to one of them.
+- A "Video or post" field on each weekly goal too, so a priority like "Publish
+  the demo" points at the video planned for it. Once PolishCast records it or
+  PublishKit writes the post, the goal follows, and shows whether it is ready
+  or out.

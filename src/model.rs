@@ -7,9 +7,10 @@
 //! the saved file stays readable and a column added later reads as empty in
 //! lines written before it.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use chrono::{Datelike, NaiveDate};
+use desktop_kit::library::Item;
 use serde::{Deserialize, Serialize};
 
 /// One of the cockpit's tables.
@@ -75,6 +76,9 @@ pub enum Kind {
     Due,
     /// A line of the Contacts table, kept as its id.
     Contact,
+    /// A video or post in the media library the other apps share, kept as
+    /// its id there (see `crate::media`).
+    Media,
 }
 
 /// How much room a column takes in the grid.
@@ -159,6 +163,7 @@ const GOALS: &[Column] = &[
     ),
     col("goal", "Goal", Kind::Text, Width::Wide, true),
     col("action", "Main action", Kind::Long, Width::Wide, false),
+    col("media", "Video or post", Kind::Media, Width::Wide, false),
     col(
         "status",
         "Status",
@@ -181,6 +186,7 @@ const ACTIONS: &[Column] = &[
         true,
     ),
     col("contact", "Contact", Kind::Contact, Width::Medium, true),
+    col("media", "Video or post", Kind::Media, Width::Wide, false),
     col("target", "Person / target", Kind::Text, Width::Wide, false),
     col("result", "Result", Kind::Long, Width::Wide, false),
     col("learned", "What I learned", Kind::Long, Width::Wide, false),
@@ -422,6 +428,11 @@ pub fn iso(day: NaiveDate) -> String {
     day.format("%Y-%m-%d").to_string()
 }
 
+/// The Monday that starts the week `day` is in.
+pub fn start_of_week(day: NaiveDate) -> NaiveDate {
+    end_of_week(day) - chrono::Duration::days(6)
+}
+
 /// The Sunday that ends the week `day` is in.
 pub fn end_of_week(day: NaiveDate) -> NaiveDate {
     day + chrono::Duration::days(i64::from(6 - day.weekday().num_days_from_monday()))
@@ -521,6 +532,28 @@ pub struct Cockpit {
     /// with none.
     #[serde(default)]
     pub contacts: Vec<Row>,
+    /// The posts from the media library already logged in Field progress.
+    #[serde(default, skip_serializing_if = "PostLog::is_empty")]
+    pub posts: PostLog,
+}
+
+/// Which posts that went out are already in Field progress, so each is
+/// logged once, and one whose line was deleted stays deleted.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct PostLog {
+    /// The Monday of the week MiniCRM first read the library: what went out
+    /// before is history, and isn't logged.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub since: String,
+    /// Their ids in the library.
+    #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
+    pub logged: BTreeSet<String>,
+}
+
+impl PostLog {
+    fn is_empty(&self) -> bool {
+        self.since.is_empty() && self.logged.is_empty()
+    }
 }
 
 impl Cockpit {
@@ -570,7 +603,9 @@ impl Cockpit {
                     Kind::Date => iso(today),
                     Kind::Week => week_label(today),
                     Kind::Choice(options) => options.first()?.label.to_string(),
-                    Kind::Text | Kind::Long | Kind::Due | Kind::Contact => return None,
+                    Kind::Text | Kind::Long | Kind::Due | Kind::Contact | Kind::Media => {
+                        return None
+                    }
                 };
                 Some((c.key.to_string(), value))
             })
@@ -642,13 +677,15 @@ impl Cockpit {
             .find(|r| r.get("name").trim().to_lowercase() == name)
     }
 
-    /// A cell as it reads: a contact by their name, anything else as kept.
+    /// A cell as it reads: a contact by their name, a video or post by its
+    /// title, anything else as kept.
     pub fn display(&self, column: &Column, row: &Row) -> String {
         let value = row.get(column.key);
         match column.kind {
             Kind::Contact => self
                 .contact(value)
                 .map_or_else(String::new, |c| c.get("name").to_string()),
+            Kind::Media => crate::media::title(value),
             _ => value.to_string(),
         }
     }
@@ -717,6 +754,79 @@ impl Cockpit {
         self.set(sheet, id, key, iso(from + chrono::Duration::days(days)));
     }
 
+    /// Logs in Field progress every post from the media library that went
+    /// out since MiniCRM first read it and isn't logged yet: on the day it
+    /// went out, as a Post, with where it went, pointing at the post. The
+    /// result and what was learned are the person's to write. Returns how
+    /// many were logged.
+    pub fn log_posts(&mut self, items: &[Item], today: NaiveDate) -> usize {
+        if self.posts.since.is_empty() {
+            self.posts.since = iso(start_of_week(today));
+        }
+        let today = iso(today);
+        let mut out: Vec<&Item> = items
+            .iter()
+            .filter(|i| crate::media::is_post(i) && i.status.is_out())
+            .filter(|i| i.day() >= self.posts.since.as_str() && i.day() <= today.as_str())
+            .filter(|i| !self.posts.logged.contains(&i.id))
+            .collect();
+        out.sort_by(|a, b| a.date.cmp(&b.date));
+        for item in &out {
+            self.posts.logged.insert(item.id.clone());
+            if self.actions.iter().any(|r| r.get("media") == item.id) {
+                continue;
+            }
+            let place = crate::media::place(item);
+            self.add_with(
+                Sheet::Actions,
+                &[
+                    ("date", item.day()),
+                    ("action", item.title.trim()),
+                    ("type", "Post"),
+                    ("media", &item.id),
+                    ("target", &place),
+                ],
+            );
+        }
+        out.len()
+    }
+
+    /// Points every video-or-post cell that named a planned idea at what was
+    /// made for it, once PolishCast, TrackCut or PublishKit took the idea
+    /// over: the idea is gone from the library then, and the take or post
+    /// keeps its id. Returns how many cells moved.
+    pub fn follow_plans(&mut self, items: &[Item]) -> usize {
+        let mut moved = 0;
+        for sheet in Sheet::ALL {
+            let keys: Vec<&str> = sheet
+                .columns()
+                .iter()
+                .filter(|c| c.kind == Kind::Media)
+                .map(|c| c.key)
+                .collect();
+            for row in self.rows_mut(sheet) {
+                for key in &keys {
+                    let id = row.get(key);
+                    if id.is_empty() || items.iter().any(|i| i.id == id) {
+                        continue;
+                    }
+                    if let Some(made) = items.iter().find(|i| i.plans.iter().any(|p| p == id)) {
+                        row.cells.insert(key.to_string(), made.id.clone());
+                        moved += 1;
+                    }
+                }
+            }
+        }
+        moved
+    }
+
+    /// Keeps up with the media library: cells follow planned ideas to what
+    /// was made for them, and posts that went out are logged.
+    pub fn follow_library(&mut self, items: &[Item], today: NaiveDate) {
+        self.follow_plans(items);
+        self.log_posts(items, today);
+    }
+
     /// How many lines of a table have `label` in the column `key`.
     pub fn count(&self, sheet: Sheet, key: &str, label: &str) -> usize {
         self.rows(sheet)
@@ -729,6 +839,7 @@ impl Cockpit {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use desktop_kit::library::{Kind as MediaKind, Status};
 
     fn day() -> NaiveDate {
         NaiveDate::from_ymd_opt(2026, 11, 11).unwrap()
@@ -927,5 +1038,177 @@ mod tests {
         );
         let sunday = NaiveDate::from_ymd_opt(2026, 11, 15).unwrap();
         assert_eq!(end_of_week(sunday), sunday);
+    }
+
+    fn post(id: &str, kind: MediaKind, network: Option<&str>, status: Status, date: &str) -> Item {
+        let mut item = Item::new(
+            id,
+            "publishkit",
+            kind,
+            id.trim_start_matches("publishkit:"),
+            status,
+        );
+        item.network = network.map(String::from);
+        item.date = date.into();
+        item
+    }
+
+    fn library() -> Vec<Item> {
+        vec![
+            post(
+                "publishkit:linkedin",
+                MediaKind::Social,
+                Some("linkedin"),
+                Status::Posted,
+                "2026-11-10T09:00",
+            ),
+            post(
+                "publishkit:blog",
+                MediaKind::Blog,
+                None,
+                Status::Published,
+                "2026-11-09",
+            ),
+            post(
+                "publishkit:last-month",
+                MediaKind::Blog,
+                None,
+                Status::Published,
+                "2026-10-01",
+            ),
+            post(
+                "publishkit:tomorrow",
+                MediaKind::Social,
+                Some("x"),
+                Status::Queued,
+                "2026-11-12",
+            ),
+            post(
+                "polishcast:demo",
+                MediaKind::Video,
+                None,
+                Status::Posted,
+                "2026-11-10",
+            ),
+        ]
+    }
+
+    #[test]
+    fn posts_that_went_out_this_week_are_logged_once_the_oldest_first() {
+        let mut cockpit = Cockpit::default();
+        assert_eq!(cockpit.log_posts(&library(), day()), 2);
+        assert_eq!(cockpit.posts.since, "2026-11-09");
+        let logged: Vec<_> = cockpit
+            .actions
+            .iter()
+            .map(|r| {
+                (
+                    r.get("date"),
+                    r.get("action"),
+                    r.get("type"),
+                    r.get("target"),
+                    r.get("media"),
+                )
+            })
+            .collect();
+        assert_eq!(
+            logged,
+            [
+                ("2026-11-09", "blog", "Post", "Blog", "publishkit:blog"),
+                (
+                    "2026-11-10",
+                    "linkedin",
+                    "Post",
+                    "LinkedIn",
+                    "publishkit:linkedin"
+                ),
+            ]
+        );
+        assert_eq!(cockpit.log_posts(&library(), day()), 0);
+        assert_eq!(cockpit.actions.len(), 2);
+    }
+
+    #[test]
+    fn a_logged_post_whose_line_was_deleted_stays_deleted() {
+        let mut cockpit = Cockpit::default();
+        cockpit.log_posts(&library(), day());
+        let first = cockpit.actions[0].id;
+        cockpit.remove(Sheet::Actions, first);
+        assert_eq!(cockpit.log_posts(&library(), day()), 0);
+        assert_eq!(cockpit.actions.len(), 1);
+    }
+
+    #[test]
+    fn a_queued_post_is_logged_once_it_went_out_and_its_day_came() {
+        let mut cockpit = Cockpit::default();
+        cockpit.log_posts(&library(), day());
+        let mut items = library();
+        items[3].status = Status::Posted;
+        assert_eq!(cockpit.log_posts(&items, day()), 0);
+        let thursday = day() + chrono::Duration::days(1);
+        assert_eq!(cockpit.log_posts(&items, thursday), 1);
+        assert_eq!(cockpit.actions[2].get("target"), "X");
+    }
+
+    #[test]
+    fn a_post_an_action_already_names_is_not_logged_twice() {
+        let mut cockpit = Cockpit::default();
+        let mine = cockpit.add_with(
+            Sheet::Actions,
+            &[("action", "Launch post"), ("media", "publishkit:linkedin")],
+        );
+        assert_eq!(cockpit.log_posts(&library(), day()), 2);
+        assert_eq!(cockpit.actions.len(), 2);
+        assert_eq!(cockpit.actions[0].id, mine);
+    }
+
+    #[test]
+    fn a_cockpit_without_posts_logged_saves_as_before() {
+        let saved = serde_json::to_string(&Cockpit::default()).unwrap();
+        assert!(!saved.contains("posts"), "{saved}");
+        let old: Cockpit = serde_json::from_str(r#"{"actions":[]}"#).unwrap();
+        assert_eq!(old.posts, PostLog::default());
+        assert_eq!(
+            start_of_week(day()),
+            NaiveDate::from_ymd_opt(2026, 11, 9).unwrap()
+        );
+    }
+
+    #[test]
+    fn a_goal_s_planned_video_follows_it_once_it_is_recorded() {
+        let mut cockpit = Cockpit::default();
+        let goal = cockpit.add_with(
+            Sheet::Goals,
+            &[("goal", "Publish the demo"), ("media", "plan:1-demo")],
+        );
+        let planned = post(
+            "plan:1-demo",
+            MediaKind::Video,
+            None,
+            Status::Planned,
+            "2026-11-10",
+        );
+        assert_eq!(cockpit.follow_plans(&[planned]), 0, "still planned");
+
+        let mut take = post(
+            "polishcast:demo",
+            MediaKind::Video,
+            None,
+            Status::Ready,
+            "2026-11-10",
+        );
+        take.plans = vec!["plan:1-demo".into()];
+        assert_eq!(cockpit.follow_plans(&[take.clone()]), 1);
+        assert_eq!(
+            cockpit.row(Sheet::Goals, goal).unwrap().get("media"),
+            "polishcast:demo"
+        );
+        assert_eq!(cockpit.follow_plans(&[take]), 0);
+        // Gone with nothing made for it: left as it is.
+        assert_eq!(cockpit.follow_plans(&[]), 0);
+        assert_eq!(
+            cockpit.row(Sheet::Goals, goal).unwrap().get("media"),
+            "polishcast:demo"
+        );
     }
 }
