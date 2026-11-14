@@ -18,6 +18,11 @@ serde_json = "1"
 # Today's date and week number for a new line.
 chrono = "0.4"
 dirs = "5"
+# A table in and out of a spreadsheet: quoting, line breaks in a cell, and
+# the semicolons Excel writes in some countries.
+csv = "1"
+# The Open and Save dialogs for a CSV file, as in the other desktop apps.
+rfd = "0.15"
 # Decodes assets/icon.png into the runtime window icon; png is the only
 # format needed.
 image = { version = "0.25", default-features = false, features = ["png"] }

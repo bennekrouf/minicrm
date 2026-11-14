@@ -1,10 +1,10 @@
 //! The guide: what the cockpit is for, the weekly routine in four steps,
-//! and how this week's priorities stand.
+//! how this week's priorities stand, and where the contacts are.
 
 use dioxus::prelude::*;
 
 use super::{Ui, View};
-use crate::model::{Choice, Cockpit, Sheet, GOAL_STATUS};
+use crate::model::{Choice, Cockpit, Sheet, Urgency, GOAL_STATUS, STAGES};
 
 /// The statuses counted on this page, in the order they are shown.
 const COUNTED: [&str; 3] = ["Done", "In progress", "Blocked"];
@@ -21,6 +21,12 @@ pub fn Guide() -> Element {
             (*o, count)
         })
         .collect();
+    let pipeline: Vec<(Choice, usize)> = STAGES
+        .iter()
+        .map(|o| (*o, cockpit.read().count(Sheet::Contacts, "stage", o.label)))
+        .collect();
+    let due = cockpit.read().follow_ups((ui.today)());
+    let late = due.iter().filter(|f| f.urgency == Urgency::Overdue).count();
 
     rsx! {
         div { class: "guide",
@@ -31,7 +37,8 @@ pub fn Guide() -> Element {
                 }
                 p { class: "guide-text",
                     "Each week it helps me answer four questions: what I meant to do, what I actually \
-                     did, what I noticed, and what I need to clear up now."
+                     did, what I noticed, and what I need to clear up now. Beside them, it keeps the \
+                     people I talk to, where each one stands, and when to get back to them."
                 }
 
                 div { class: "guide-hint", "My priorities" }
@@ -52,9 +59,38 @@ pub fn Guide() -> Element {
                     }
                 }
 
+                div { class: "guide-hint", "My contacts" }
+                div { class: "recap recap-pipeline",
+                    for (option, count) in pipeline {
+                        button {
+                            key: "{option.label}",
+                            class: "recap-tile recap-{option.tone.class()}",
+                            title: "Show the contacts at \u{201c}{option.label}\u{201d}",
+                            onclick: move |_| {
+                                let mut ui = ui;
+                                ui.go(View::Sheet(Sheet::Contacts));
+                                ui.filter.set(Some(option.label));
+                            },
+                            span { class: "recap-count", "{count}" }
+                            span { class: "recap-label", "{option.label}" }
+                        }
+                    }
+                }
+                button {
+                    class: if late > 0 { "guide-due guide-due-late" } else { "guide-due" },
+                    onclick: move |_| ui.go(View::FollowUps),
+                    match (due.len(), late) {
+                        (0, _) => rsx! { "Nothing to follow up before Sunday" },
+                        (1, 0) => rsx! { "1 follow-up due before Sunday" },
+                        (n, 0) => rsx! { "{n} follow-ups due before Sunday" },
+                        (n, late) => rsx! { "{n} follow-ups due before Sunday, {late} of them late" },
+                    }
+                    span { class: "step-open", "Follow-ups \u{203a}" }
+                }
+
                 div { class: "guide-hint", "My routine in 4 steps" }
                 div { class: "steps",
-                    for (index, sheet) in Sheet::ALL.into_iter().enumerate() {
+                    for (index, sheet) in Sheet::ROUTINE.into_iter().enumerate() {
                         button {
                             key: "{sheet.title()}",
                             class: "step-row",

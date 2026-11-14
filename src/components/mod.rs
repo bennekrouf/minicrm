@@ -2,16 +2,19 @@
 //! that is open, and the editor of a selected line on the right.
 
 mod detail;
+mod followups;
 mod guide;
 mod sheet;
 mod sidebar;
 #[cfg(test)]
 mod tests;
 
+use chrono::NaiveDate;
 use dioxus::prelude::*;
 
-use crate::model::Sheet;
+use crate::model::{today, Sheet};
 
+use followups::FollowUps;
 use guide::Guide;
 use sheet::SheetView;
 use sidebar::Sidebar;
@@ -21,6 +24,8 @@ use sidebar::Sidebar;
 pub enum View {
     /// How it works: what the cockpit is for, and this week's count.
     Guide,
+    /// The follow-ups due by the end of the week, from every table.
+    FollowUps,
     Sheet(Sheet),
 }
 
@@ -37,6 +42,11 @@ pub struct Ui {
     /// The column lines are sorted by, and whether ascending. None is the
     /// order they were added in.
     pub sort: Signal<Option<(usize, bool)>>,
+    /// What the last import or export did, under the page's heading.
+    pub notice: Signal<Option<String>>,
+    /// The day follow-ups are counted against. Read again each time a page
+    /// is opened, so a window left open overnight catches up.
+    pub today: Signal<NaiveDate>,
 }
 
 impl Ui {
@@ -49,6 +59,8 @@ impl Ui {
             search: Signal::new(String::new()),
             filter: Signal::new(None),
             sort: Signal::new(None),
+            notice: Signal::new(None),
+            today: Signal::new(today()),
         }
     }
 
@@ -59,7 +71,15 @@ impl Ui {
         self.search.set(String::new());
         self.filter.set(None);
         self.sort.set(None);
+        self.notice.set(None);
+        self.today.set(today());
         self.view.set(view);
+    }
+
+    /// Opens a line of any table in its editor.
+    pub fn open(mut self, sheet: Sheet, id: u64) {
+        self.go(View::Sheet(sheet));
+        self.selected.set(Some(id));
     }
 }
 
@@ -72,6 +92,7 @@ pub fn Workspace() -> Element {
             Sidebar {}
             match (ui.view)() {
                 View::Guide => rsx! { Guide {} },
+                View::FollowUps => rsx! { FollowUps {} },
                 View::Sheet(sheet) => rsx! { SheetView { sheet } },
             }
         }

@@ -1,8 +1,9 @@
 # MiniCRM
 
-A weekly cockpit for someone starting a business. It answers four questions
-each week, one table each, and nothing more: no indicators, no automation, no
-connection to other tools.
+A weekly cockpit for someone starting a business and promoting it on their
+own. It answers four questions each week, one table each, and keeps the people
+the work is done with: no automation and no connection to other tools, only a
+CSV file in and out.
 
 | Page | The question it answers |
 | --- | --- |
@@ -11,8 +12,16 @@ connection to other tools.
 | Weak signals | What did I notice? |
 | Open questions | What do I need to clear up now? |
 
-**How it works**, the page it opens on, explains the routine in four steps and
-counts the priorities that are done, under way and blocked.
+Beside them:
+
+| Page | What it keeps |
+| --- | --- |
+| Contacts | Who each person is, where I found them, and their stage, from *Lead* to *Client* |
+| Follow-ups | Every contact and action whose follow-up date is this week or past, the late ones first |
+
+**How it works**, the page it opens on, explains the routine in four steps,
+counts the priorities that are done, under way and blocked, the contacts at
+each stage, and the follow-ups due before Sunday.
 
 ![MiniCRM](docs/screenshot.png)
 
@@ -28,6 +37,11 @@ that helps freelancers organise their prospecting), dated in the current week.
   *Blocked*.
 - Filter a table by its list column with the chips above it, search every
   column with the box, and sort by clicking a column heading.
+- A line of Field progress names its contact; a contact's editor lists what
+  was done with them and logs the next action.
+- **Import CSV** adds lines from a spreadsheet, Notion or LinkedIn's
+  connections export, matching the file's headings to the table's columns.
+  **Export CSV** saves a table, one column per column, contacts by name.
 - Everything is saved as you type, to `cockpit.json` in the app's data folder
   (Settings shows the file). Copying that file duplicates the cockpit.
 

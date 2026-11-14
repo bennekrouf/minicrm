@@ -1,15 +1,17 @@
 //! MiniCRM — a weekly cockpit for someone starting a business.
 //!
 //! Each week it answers four questions, one table each: what I meant to do,
-//! what I really did, what I noticed, and what I need to clear up now. No
-//! indicators, no automation, nothing connected to other tools: the tables,
-//! their example lines, and a count of this week's priorities.
+//! what I really did, what I noticed, and what I need to clear up now. Beside
+//! them, the contacts the work is done with, where each one stands, and the
+//! follow-ups that have come round. No automation and nothing connected to
+//! other tools: a table goes in and out as a CSV file.
 
 mod components;
 mod kit;
 mod model;
 mod seed;
 mod store;
+mod transfer;
 
 use desktop_kit::ui::{use_theme, Banners, Header, SettingsWindow};
 use dioxus::desktop::LogicalSize;
