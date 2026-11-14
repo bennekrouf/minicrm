@@ -5,6 +5,9 @@
 use dioxus::prelude::*;
 
 use super::Ui;
+use desktop_kit::library::{Item, Status};
+
+use crate::media;
 use crate::model::{show_date, Cockpit, Column, Kind, Row, Sheet};
 
 #[component]
@@ -189,6 +192,103 @@ fn Field(sheet: Sheet, id: u64, column: Column, value: String) -> Element {
             }
         }
         Kind::Contact => rsx! { ContactField { sheet, id, column, value } },
+        Kind::Media => rsx! { MediaField { sheet, id, column, value } },
+    }
+}
+
+/// The items a video-or-post field offers, newest first: enough to find
+/// this month's work without scrolling through years of posts.
+const MEDIA_CHOICES: usize = 80;
+
+/// The video or post an action was about, from the media library the other
+/// apps share: where it stands, and a way to open it where it was made.
+#[component]
+fn MediaField(sheet: Sheet, id: u64, column: Column, value: String) -> Element {
+    let mut ui = use_context::<Ui>();
+    let mut cockpit = use_context::<Signal<Cockpit>>();
+    let library = use_context::<Signal<Vec<Item>>>();
+    let key = column.key;
+    let items = library.read();
+    let linked = items.iter().find(|i| i.id == value).cloned();
+    let mut choices: Vec<(String, String)> = items
+        .iter()
+        .take(MEDIA_CHOICES)
+        .map(|i| {
+            let title = if i.title.trim().is_empty() {
+                "Untitled"
+            } else {
+                i.title.trim()
+            };
+            (
+                i.id.clone(),
+                format!(
+                    "{title} \u{b7} {}, {}",
+                    media::what(i),
+                    i.status.label().to_lowercase()
+                ),
+            )
+        })
+        .collect();
+    if let Some(item) = &linked {
+        if !choices.iter().any(|(i, _)| *i == item.id) {
+            choices.push((item.id.clone(), item.title.clone()));
+        }
+    }
+    let gone = !value.is_empty() && linked.is_none();
+
+    rsx! {
+        div { class: "field",
+            span { "{column.label}" }
+            div { class: "field-row",
+                select {
+                    onchange: move |e| cockpit.write().set(sheet, id, key, e.value()),
+                    option { value: "", selected: value.is_empty(), "None" }
+                    if gone {
+                        option { value: "{value}", selected: true, "No longer in the library" }
+                    }
+                    for (item, label) in choices {
+                        option {
+                            key: "{item}",
+                            value: "{item}",
+                            selected: item == value,
+                            "{label}"
+                        }
+                    }
+                }
+            }
+            if let Some(item) = linked {
+                div { class: "field-row media-linked",
+                    span { class: "pill pill-{media::tone(item.status).class()}", "{item.status.label()}" }
+                    button {
+                        class: "btn btn-small",
+                        title: "Open it in {media::app_name(&item)}",
+                        onclick: {
+                            let item = item.clone();
+                            move |_| {
+                                if let Err(e) = media::open(&item) {
+                                    ui.notice.set(Some(e));
+                                }
+                            }
+                        },
+                        "Open in {media::app_name(&item)} \u{203a}"
+                    }
+                    if let Some(url) = item.url.clone().filter(|u| desktop_kit::browser::is_web_url(u)) {
+                        button {
+                            class: "btn btn-small",
+                            title: "{url}",
+                            onclick: move |_| {
+                                desktop_kit::browser::open(&url);
+                            },
+                            "See it online \u{203a}"
+                        }
+                    }
+                }
+            } else if library.read().is_empty() {
+                div { class: "field-hint",
+                    "What PolishCast, TrackCut and PublishKit make shows here, to say which video or post this was."
+                }
+            }
+        }
     }
 }
 
@@ -238,23 +338,38 @@ fn ContactField(sheet: Sheet, id: u64, column: Column, value: String) -> Element
     }
 }
 
+/// One action in a contact's history, as the list shows it.
+struct HistoryRow {
+    id: u64,
+    date: String,
+    title: String,
+    result: String,
+    /// The video or post it was about, and where that stands.
+    media: Option<(String, Status)>,
+}
+
 /// What was done with a contact, from Field progress, the latest first, and
 /// a way to log the next thing.
 #[component]
 fn History(id: u64) -> Element {
     let ui = use_context::<Ui>();
     let mut cockpit = use_context::<Signal<Cockpit>>();
-    let rows: Vec<(u64, String, String, String)> = cockpit
+    // Read so the list follows the library: a video sent them moves on.
+    let library = use_context::<Signal<Vec<Item>>>();
+    let rows: Vec<HistoryRow> = cockpit
         .read()
         .history(id)
         .into_iter()
-        .map(|r: &Row| {
-            (
-                r.id,
-                show_date(r.get("date")),
-                r.get("action").to_string(),
-                r.get("result").to_string(),
-            )
+        .map(|r: &Row| HistoryRow {
+            id: r.id,
+            date: show_date(r.get("date")),
+            title: r.get("action").to_string(),
+            result: r.get("result").to_string(),
+            media: library
+                .read()
+                .iter()
+                .find(|i| !r.get("media").is_empty() && i.id == r.get("media"))
+                .map(|i| (format!("{}: {}", media::what(i), i.title.trim()), i.status)),
         })
         .collect();
 
@@ -265,19 +380,25 @@ fn History(id: u64) -> Element {
                 div { class: "history-empty", "Nothing logged in Field progress yet." }
             } else {
                 div { class: "history",
-                    for (action, date, title, result) in rows {
+                    for row in rows {
                         button {
-                            key: "{action}",
+                            key: "{row.id}",
                             class: "history-row",
                             title: "Open this action in Field progress",
-                            onclick: move |_| ui.open(Sheet::Actions, action),
-                            span { class: "history-date", "{date}" }
+                            onclick: move |_| ui.open(Sheet::Actions, row.id),
+                            span { class: "history-date", "{row.date}" }
                             span { class: "history-main",
                                 span { class: "history-title",
-                                    if title.trim().is_empty() { "Action to describe" } else { "{title}" }
+                                    if row.title.trim().is_empty() { "Action to describe" } else { "{row.title}" }
                                 }
-                                if !result.is_empty() {
-                                    span { class: "history-sub", "{result}" }
+                                if !row.result.is_empty() {
+                                    span { class: "history-sub", "{row.result}" }
+                                }
+                                if let Some((what, status)) = row.media {
+                                    span { class: "history-media",
+                                        span { class: "history-sub", "{what}" }
+                                        span { class: "pill pill-{media::tone(status).class()}", "{status.label()}" }
+                                    }
                                 }
                             }
                         }

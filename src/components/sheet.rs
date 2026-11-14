@@ -374,7 +374,7 @@ fn cell(sheet: Sheet, column: &Column, value: &str, today: NaiveDate) -> Element
             let tone = Urgency::of(value, today).map_or(Tone::Neutral, Urgency::tone);
             rsx! { span { class: "pill pill-{tone.class()} cell-date", "{show_date(value)}" } }
         }
-        Kind::Week | Kind::Text | Kind::Long | Kind::Contact => {
+        Kind::Week | Kind::Text | Kind::Long | Kind::Contact | Kind::Media => {
             rsx! { div { class: "clamp", "{value}" } }
         }
     }
