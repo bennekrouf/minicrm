@@ -33,3 +33,8 @@
   spreadsheet, Notion or LinkedIn's connections export; contacts already in
   the cockpit are not added twice. Files with semicolons, as Excel writes them
   in some countries, are read too.
+- Use MiniCRM from Claude or Codex: the button in the header shows how to
+  connect them. Claude can then read your week, list and update contacts, log
+  what you did with someone, set or clear follow-ups, and import or export a
+  table as CSV. It asks you before deleting anything, and the window shows its
+  changes within moments.
