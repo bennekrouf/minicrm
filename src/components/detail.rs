@@ -1,10 +1,11 @@
 //! The editor of one line, on the right: every column of its table as a
-//! field, saved as it is typed.
+//! field, saved as it is typed. A contact's editor also lists what was done
+//! with them.
 
 use dioxus::prelude::*;
 
 use super::Ui;
-use crate::model::{Cockpit, Column, Kind, Sheet};
+use crate::model::{show_date, Cockpit, Column, Kind, Row, Sheet};
 
 #[component]
 pub fn Detail(sheet: Sheet, id: u64) -> Element {
@@ -46,6 +47,9 @@ pub fn Detail(sheet: Sheet, id: u64) -> Element {
                         column: *column,
                         value: row.get(column.key).to_string(),
                     }
+                }
+                if sheet == Sheet::Contacts {
+                    History { id }
                 }
             }
             div { class: "detail-actions",
@@ -89,6 +93,7 @@ pub fn Detail(sheet: Sheet, id: u64) -> Element {
 #[component]
 fn Field(sheet: Sheet, id: u64, column: Column, value: String) -> Element {
     let mut cockpit = use_context::<Signal<Cockpit>>();
+    let today = (use_context::<Ui>().today)();
     let key = column.key;
 
     match column.kind {
@@ -152,5 +157,148 @@ fn Field(sheet: Sheet, id: u64, column: Column, value: String) -> Element {
                 }
             }
         },
+        // Empty until there is something to follow up, and emptied once it
+        // is done.
+        Kind::Due => {
+            rsx! {
+                div { class: "field field-short",
+                    span { "{column.label}" }
+                    div { class: "field-row",
+                        input {
+                            r#type: "date",
+                            value: "{value}",
+                            oninput: move |e| cockpit.write().set(sheet, id, key, e.value()),
+                        }
+                        if value.is_empty() {
+                            button {
+                                class: "btn btn-small",
+                                title: "Follow up a week from today",
+                                onclick: move |_| cockpit.write().postpone(sheet, id, 7, today),
+                                "In a week"
+                            }
+                        } else {
+                            button {
+                                class: "btn btn-small",
+                                title: "Nothing to follow up any more",
+                                onclick: move |_| cockpit.write().set(sheet, id, key, String::new()),
+                                "Clear"
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        Kind::Contact => rsx! { ContactField { sheet, id, column, value } },
+    }
+}
+
+/// Who an action was with: one of the contacts, by name, and a way to
+/// open them.
+#[component]
+fn ContactField(sheet: Sheet, id: u64, column: Column, value: String) -> Element {
+    let ui = use_context::<Ui>();
+    let mut cockpit = use_context::<Signal<Cockpit>>();
+    let key = column.key;
+    let mut people: Vec<(u64, String)> = cockpit
+        .read()
+        .contacts
+        .iter()
+        .map(|r| (r.id, r.get("name").trim().to_string()))
+        .collect();
+    people.sort_by_key(|(_, name)| name.to_lowercase());
+    let linked = cockpit.read().contact(&value).map(|r| r.id);
+
+    rsx! {
+        div { class: "field",
+            span { "{column.label}" }
+            div { class: "field-row",
+                select {
+                    value: "{linked.map(|i| i.to_string()).unwrap_or_default()}",
+                    onchange: move |e| cockpit.write().set(sheet, id, key, e.value()),
+                    option { value: "", selected: linked.is_none(), "No one in particular" }
+                    for (person, name) in people {
+                        option {
+                            key: "{person}",
+                            value: "{person}",
+                            selected: linked == Some(person),
+                            if name.is_empty() { "Contact without a name" } else { "{name}" }
+                        }
+                    }
+                }
+                if let Some(person) = linked {
+                    button {
+                        class: "btn btn-small",
+                        title: "Open this contact",
+                        onclick: move |_| ui.open(Sheet::Contacts, person),
+                        "Open \u{203a}"
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// What was done with a contact, from Field progress, the latest first, and
+/// a way to log the next thing.
+#[component]
+fn History(id: u64) -> Element {
+    let ui = use_context::<Ui>();
+    let mut cockpit = use_context::<Signal<Cockpit>>();
+    let rows: Vec<(u64, String, String, String)> = cockpit
+        .read()
+        .history(id)
+        .into_iter()
+        .map(|r: &Row| {
+            (
+                r.id,
+                show_date(r.get("date")),
+                r.get("action").to_string(),
+                r.get("result").to_string(),
+            )
+        })
+        .collect();
+
+    rsx! {
+        div { class: "field",
+            span { "What I did with them" }
+            if rows.is_empty() {
+                div { class: "history-empty", "Nothing logged in Field progress yet." }
+            } else {
+                div { class: "history",
+                    for (action, date, title, result) in rows {
+                        button {
+                            key: "{action}",
+                            class: "history-row",
+                            title: "Open this action in Field progress",
+                            onclick: move |_| ui.open(Sheet::Actions, action),
+                            span { class: "history-date", "{date}" }
+                            span { class: "history-main",
+                                span { class: "history-title",
+                                    if title.trim().is_empty() { "Action to describe" } else { "{title}" }
+                                }
+                                if !result.is_empty() {
+                                    span { class: "history-sub", "{result}" }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            button {
+                class: "btn btn-small history-add",
+                title: "A new line in Field progress, with this contact",
+                onclick: move |_| {
+                    let today = (ui.today)();
+                    let action = {
+                        let mut c = cockpit.write();
+                        let action = c.add(Sheet::Actions, today);
+                        c.set(Sheet::Actions, action, "contact", id.to_string());
+                        action
+                    };
+                    ui.open(Sheet::Actions, action);
+                },
+                "+ Log an action with them"
+            }
+        }
     }
 }

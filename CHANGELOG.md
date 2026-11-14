@@ -19,3 +19,17 @@
 - Duplicate and delete for a line, with a confirmation before deleting.
 - Settings shows the file the cockpit is kept in: copy it to duplicate the
   cockpit.
+- Contacts, a table of the people you talk to: who they are, where you found
+  them, their profile and email, and the stage they are at, from Lead to
+  Client. The guide counts how many are at each stage; a click shows them.
+- A contact on each line of Field progress, so every message, call and
+  interview is tied to the person it was with. A contact's editor lists what
+  you did with them, and logs the next action in one click.
+- Follow-up dates on contacts and on actions, and a Follow-ups page with
+  everyone to get back to before Sunday, the late ones first. Push one back a
+  week or mark it done from there; the sidebar shows how many are due, in red
+  when one is late.
+- Import CSV and Export CSV on every table. Bring contacts over from a
+  spreadsheet, Notion or LinkedIn's connections export; contacts already in
+  the cockpit are not added twice. Files with semicolons, as Excel writes them
+  in some countries, are read too.

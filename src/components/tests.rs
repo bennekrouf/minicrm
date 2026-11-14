@@ -25,8 +25,14 @@ fn at(view: View) -> At {
     }
 }
 
+/// A Wednesday: the examples' follow-ups are one late, three due by
+/// Sunday.
+fn wednesday() -> NaiveDate {
+    NaiveDate::from_ymd_opt(2026, 11, 11).unwrap()
+}
+
 fn examples() -> Cockpit {
-    seed::examples(NaiveDate::from_ymd_opt(2026, 11, 11).unwrap())
+    seed::examples(wednesday())
 }
 
 #[allow(non_snake_case)]
@@ -44,6 +50,8 @@ fn Harness(at: At) -> Element {
         search: Signal::new(String::new()),
         filter: Signal::new(at.filter),
         sort: Signal::new(None),
+        notice: Signal::new(None),
+        today: Signal::new(wednesday()),
     });
     rsx! { Workspace {} }
 }
@@ -76,13 +84,108 @@ fn the_guide_explains_the_cockpit_and_counts_the_priorities() {
 }
 
 #[test]
-fn the_sidebar_lists_the_four_tables_with_their_line_counts() {
+fn the_sidebar_lists_the_tables_with_their_line_counts() {
     let html = render(at(View::Guide));
     for sheet in Sheet::ALL {
         assert!(html.contains(sheet.title()), "{sheet:?}");
     }
     assert!(html.contains(r#"<span class="sidebar-count">3</span>"#));
     assert!(html.contains(r#"<span class="sidebar-count">4</span>"#));
+    assert!(html.contains(r#"<span class="sidebar-count">5</span>"#));
+    // Four follow-ups due, one of them late, so the count is red.
+    assert!(html.contains("Follow-ups"));
+    assert!(html
+        .contains(r#"class="sidebar-count sidebar-count-late" title="Some are overdue">4</span>"#));
+}
+
+#[test]
+fn the_guide_shows_the_pipeline_and_the_follow_ups_due() {
+    let html = render(at(View::Guide));
+    for stage in [
+        "Lead",
+        "Contacted",
+        "In conversation",
+        "Proposal sent",
+        "Client",
+        "Not now",
+    ] {
+        assert!(html.contains(stage), "{stage}");
+    }
+    assert!(html.contains(
+        r#"<span class="recap-count">1</span><span class="recap-label">Proposal sent</span>"#
+    ));
+    assert!(html.contains("4 follow-ups due before Sunday, 1 of them late"));
+}
+
+#[test]
+fn the_follow_ups_page_lists_the_late_first() {
+    let html = render(at(View::FollowUps));
+    let late = html.find("Overdue").unwrap();
+    let today = html.find("Later this week").unwrap();
+    let sophie = html.find("Sophie Durand").unwrap();
+    let lea = html.find("Léa Martin").unwrap();
+    assert!(late < sophie && sophie < today && today < lea);
+    assert!(!html.contains("Nina Rossi"), "due next week");
+    assert!(html.contains("Ask whether the pre-sale offer suits her"));
+    assert!(html.contains(r#"<span class="pill pill-bad cell-date">10 Nov 2026</span>"#));
+    assert!(html.contains("In a week"));
+    assert!(html.contains("Done"));
+}
+
+#[test]
+fn nothing_due_says_so() {
+    let mut view = at(View::FollowUps);
+    view.empty = true;
+    assert!(render(view).contains("Nothing to follow up this week"));
+}
+
+#[test]
+fn a_contact_editor_lists_what_was_done_with_them() {
+    let cockpit = examples();
+    let id = cockpit.contact_named("Léa Martin").unwrap().id;
+    let mut view = at(View::Sheet(Sheet::Contacts));
+    view.selected = Some(id);
+    let html = render(view);
+    assert!(html.contains("What I did with them"));
+    assert!(html.contains("Interview with a freelance graphic designer"));
+    assert!(html.contains("+ Log an action with them"));
+    // The stage is marked, and the follow-up can be cleared.
+    assert!(html.contains(r#"class="choice choice-on choice-soft">In conversation"#));
+    assert!(html.contains("Clear"));
+}
+
+#[test]
+fn an_action_names_its_contact_in_the_grid_and_the_editor() {
+    let cockpit = examples();
+    let action = cockpit
+        .actions
+        .iter()
+        .find(|r| r.get("action") == "Pre-sale offer sent to Sophie")
+        .unwrap()
+        .id;
+    let sophie = cockpit.contact_named("Sophie Durand").unwrap().id;
+    let html = render(at(View::Sheet(Sheet::Actions)));
+    assert!(html.contains(r#"<div class="clamp">Sophie Durand</div>"#));
+    let mut view = at(View::Sheet(Sheet::Actions));
+    view.selected = Some(action);
+    let html = render(view);
+    assert!(
+        html.contains(&format!(r#"value="{sophie}" selected=true"#)),
+        "{html}"
+    );
+    assert!(html.contains("No one in particular"));
+    assert!(html.contains("Open \u{203a}"));
+}
+
+#[test]
+fn a_contact_grid_colours_follow_ups_as_they_come_round() {
+    let html = render(at(View::Sheet(Sheet::Contacts)));
+    assert!(html.contains("Import CSV"));
+    assert!(html.contains("Export CSV"));
+    // Sophie is late, Léa due Friday, Nina next week.
+    assert!(html.contains(r#"<span class="pill pill-bad cell-date">10 Nov 2026</span>"#));
+    assert!(html.contains(r#"<span class="pill pill-warn cell-date">13 Nov 2026</span>"#));
+    assert!(html.contains(r#"<span class="pill pill-neutral cell-date">18 Nov 2026</span>"#));
 }
 
 #[test]

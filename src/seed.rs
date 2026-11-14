@@ -2,7 +2,8 @@
 //!
 //! They follow one made-up project: an entrepreneur launching a coaching
 //! offer that helps freelancers organise their sales prospecting. Dated in
-//! the week the app is first opened, so they read as this week's work.
+//! the week the app is first opened, so they read as this week's work, with
+//! one follow-up already late and others due before Sunday.
 
 use chrono::{Datelike, Duration, NaiveDate};
 
@@ -18,6 +19,78 @@ pub fn examples(today: NaiveDate) -> Cockpit {
     };
     let week = week_label(today);
     let mut cockpit = Cockpit::default();
+
+    // The people first: the actions below name them.
+    let mut contact = std::collections::BTreeMap::new();
+    for (name, about, stage, source, link, follow_up, next, notes) in [
+        (
+            "Léa Martin",
+            "Freelance graphic designer, 3 years in business",
+            "In conversation",
+            "LinkedIn network",
+            "linkedin.com/in/lea-martin-design",
+            Some(4),
+            "Ask her for 2 contacts to interview",
+            "Prospects in bursts, only when she runs short of clients",
+        ),
+        (
+            "Karim Benali",
+            "Freelance web developer",
+            "Contacted",
+            "Commented on my LinkedIn post",
+            "linkedin.com/in/karim-benali",
+            Some(3),
+            "Thank him for his comment and offer a 20-minute call",
+            "",
+        ),
+        (
+            "Sophie Durand",
+            "Freelance copywriter",
+            "Proposal sent",
+            "Former colleague",
+            "sophie-durand.fr",
+            Some(1),
+            "Ask whether the pre-sale offer suits her",
+            "Interested in follow-up templates above all",
+        ),
+        (
+            "Tom Leroy",
+            "Freelance photographer",
+            "Lead",
+            "Recommended by Léa",
+            "",
+            None,
+            "Send a first, short and personal message",
+            "",
+        ),
+        (
+            "Nina Rossi",
+            "Freelance UX designer",
+            "Client",
+            "My newsletter",
+            "nina-rossi.design",
+            Some(9),
+            "Check in after her first week with the method",
+            "First paying client of the pilot",
+        ),
+    ] {
+        let follow_up = follow_up.map(day).unwrap_or_default();
+        let id = cockpit.add_with(
+            Sheet::Contacts,
+            &[
+                ("name", name),
+                ("about", about),
+                ("stage", stage),
+                ("source", source),
+                ("link", link),
+                ("follow_up", &follow_up),
+                ("next", next),
+                ("notes", notes),
+            ],
+        );
+        contact.insert(name, id.to_string());
+    }
+    let with = |name: &str| contact.get(name).cloned().unwrap_or_default();
 
     for (priority, goal, action, status, next, comment) in [
         (
@@ -59,57 +132,80 @@ pub fn examples(today: NaiveDate) -> Cockpit {
         );
     }
 
-    for (offset, action, kind, target, result, learned, follow_up) in [
+    for (offset, action, kind, who, target, result, learned, follow_up, follow_up_on) in [
         (
             0,
             "Message sent to 5 freelancers",
             "Message sent",
+            "",
             "Freelancers in my LinkedIn network",
             "2 replies, 1 interview booked",
             "A short, personal message gets more replies",
             "Follow up on Friday with the 3 who did not reply",
+            Some(4),
         ),
         (
             1,
             "Interview with a freelance graphic designer",
             "Interview",
+            "Léa Martin",
             "Freelance graphic designer, 3 years in business",
             "45 minutes of conversation, plenty of quotes",
             "She prospects in bursts, only when she runs short of clients",
             "Ask her for 2 contacts to interview",
+            None,
         ),
         (
             2,
             "LinkedIn post about prospecting",
             "Post",
+            "",
             "Freelancers in my network",
             "12 reactions, 3 comments",
             "The word \u{201c}follow-up\u{201d} gets a reaction",
             "Contact the 3 people who commented",
+            None,
         ),
         (
             3,
             "Test of an offer promise sentence",
             "Test",
+            "",
             "3 freelancers asked",
             "2 out of 3 understand the offer straight away",
             "\u{201c}Find clients without giving up your evenings\u{201d} lands better than \u{201c}prospecting method\u{201d}",
             "Reword and test again next week",
+            Some(7),
         ),
     ] {
+        let follow_up_on = follow_up_on.map(day).unwrap_or_default();
         cockpit.add_with(
             Sheet::Actions,
             &[
                 ("date", &day(offset)),
                 ("action", action),
                 ("type", kind),
+                ("contact", &with(who)),
                 ("target", target),
                 ("result", result),
                 ("learned", learned),
                 ("follow_up", follow_up),
+                ("follow_up_on", &follow_up_on),
             ],
         );
     }
+    // The offer sent to Sophie, the week before.
+    cockpit.add_with(
+        Sheet::Actions,
+        &[
+            ("date", &day(-3)),
+            ("action", "Pre-sale offer sent to Sophie"),
+            ("type", "Message sent"),
+            ("contact", &with("Sophie Durand")),
+            ("result", "She asked for a few days to think"),
+            ("follow_up", "Ask for her answer"),
+        ],
+    );
 
     for (offset, signal, source, meaning, importance, action) in [
         (
@@ -221,9 +317,41 @@ mod tests {
     fn every_table_opens_with_its_examples() {
         let cockpit = examples(wednesday());
         assert_eq!(cockpit.goals.len(), 3);
-        assert_eq!(cockpit.actions.len(), 4);
+        assert_eq!(cockpit.actions.len(), 5);
         assert_eq!(cockpit.signals.len(), 4);
         assert_eq!(cockpit.questions.len(), 4);
+        assert_eq!(cockpit.contacts.len(), 5);
+    }
+
+    #[test]
+    fn examples_tie_actions_to_contacts_and_leave_follow_ups_due() {
+        let cockpit = examples(wednesday());
+        let lea = cockpit.contact_named("Léa Martin").unwrap().id;
+        let sophie = cockpit.contact_named("Sophie Durand").unwrap().id;
+        assert_eq!(cockpit.history(lea).len(), 1);
+        assert_eq!(cockpit.history(sophie).len(), 1);
+        // On Wednesday: Sophie is a day late, Karim and Léa are due before
+        // Sunday, so is the message's follow-up; Nina is next week.
+        let due = cockpit.follow_ups(wednesday());
+        let titles: Vec<&str> = due.iter().map(|f| f.title.as_str()).collect();
+        assert_eq!(
+            titles,
+            vec![
+                "Sophie Durand",
+                "Karim Benali",
+                "Message sent to 5 freelancers",
+                "Léa Martin",
+            ]
+        );
+    }
+
+    #[test]
+    fn every_contact_link_points_to_a_contact() {
+        let cockpit = examples(wednesday());
+        for row in &cockpit.actions {
+            let link = row.get("contact");
+            assert!(link.is_empty() || cockpit.contact(link).is_some(), "{link}");
+        }
     }
 
     #[test]
