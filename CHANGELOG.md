@@ -1,5 +1,14 @@
 # Changelog
 
+## [Unreleased]
+
+### Changed
+
+- Logging an action with no follow-up date no longer clears the follow-up
+  the contact had due: it stays on Follow-ups until you mark it done or
+  change it yourself. An action with a follow-up date still becomes the
+  contact's next follow-up.
+
 ## [0.1.4] - 2026-11-15
 
 ### Added

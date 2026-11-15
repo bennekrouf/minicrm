@@ -705,9 +705,10 @@ impl Cockpit {
     ///   left as it is: those are the person's own calls.
     /// * the follow-up follows the latest action with them: the action's
     ///   own follow-up date (and what to do then) becomes the contact's
-    ///   next follow-up and next step; with no date on it, a follow-up the
-    ///   contact had due by then is done, and is cleared. An older action
-    ///   edited later changes neither.
+    ///   next follow-up and next step. An action with no date leaves the
+    ///   contact's follow-up as it was: only the person clears one, from
+    ///   Follow-ups or the contact. An older action edited later changes
+    ///   nothing.
     ///
     /// An action counts once it says what was done ("Action taken") and
     /// names the contact: a new line already reads "Message sent", and
@@ -732,22 +733,12 @@ impl Cockpit {
             .history(contact_id)
             .first()
             .is_some_and(|newest| newest.get("date") <= date.as_str());
-        let follow_up = if !latest {
-            None
-        } else if !due.is_empty() {
-            Some(due)
-        } else {
-            let had = contact.get("follow_up");
-            (!had.is_empty() && had <= date.as_str()).then(String::new)
-        };
-
         if let Some(stage) = stage {
             self.set(Sheet::Contacts, contact_id, "stage", stage.to_string());
         }
-        if let Some(follow_up) = follow_up {
-            let set_date = !follow_up.is_empty();
-            self.set(Sheet::Contacts, contact_id, "follow_up", follow_up);
-            if set_date && !what.is_empty() {
+        if latest && !due.is_empty() {
+            self.set(Sheet::Contacts, contact_id, "follow_up", due);
+            if !what.is_empty() {
                 self.set(Sheet::Contacts, contact_id, "next", what);
             }
         }
@@ -1151,9 +1142,10 @@ mod tests {
                 ("next", "Send the offer"),
             ],
         );
-        // Getting back to her, with no date for the next time: done.
+        // Getting back to her, with no date for the next time: her late
+        // follow-up stays until it is cleared by hand.
         let id = log(&mut cockpit, lea, &[("action", "Sent the offer")]);
-        assert_eq!(cell(&cockpit, lea, "follow_up"), "");
+        assert_eq!(cell(&cockpit, lea, "follow_up"), "2026-11-09");
         assert_eq!(cell(&cockpit, lea, "next"), "Send the offer");
         // A follow-up on the action becomes hers.
         cockpit.set(Sheet::Actions, id, "follow_up_on", "2026-11-18".into());
