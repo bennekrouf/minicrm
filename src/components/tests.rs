@@ -333,3 +333,20 @@ fn a_goal_names_the_video_or_post_it_is_for() {
     let html = render(view);
     assert!(html.contains("Video or post"), "{html}");
 }
+
+#[test]
+fn a_contact_reads_name_then_next_step_in_the_grid_and_on_its_card() {
+    let html = render(at(View::Sheet(Sheet::Contacts)));
+    let heading = |label: &str| html.find(&format!(">{label}<")).unwrap();
+    assert!(heading("Name") < heading("Next step"));
+    assert!(heading("Next step") < heading("Who they are"));
+    // The same lines as cards, for a narrow window, the name first.
+    let cards = html.find(r#"class="cards""#).unwrap();
+    let card = &html[cards..];
+    let sophie = card.find("Sophie Durand").unwrap();
+    let next = card
+        .find("Ask whether the pre-sale offer suits her")
+        .unwrap();
+    assert!(sophie < next, "{card}");
+    assert!(card.contains(r#"<span class="pill pill-bad cell-date">10 Nov 2026</span>"#));
+}

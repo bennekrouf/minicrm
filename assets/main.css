@@ -163,6 +163,9 @@ body {
     flex: 1; min-width: 0; min-height: 0;
     display: flex; flex-direction: column;
     background: var(--bg0);
+    /* The table turns into cards by the room this column has, which the
+       sidebar and the editor beside it take their share of. */
+    container: page / inline-size;
 }
 .col-head {
     display: flex; align-items: center; gap: 10px;
@@ -230,7 +233,9 @@ body {
    as a frozen first row does in a spreadsheet. */
 .grid-scroll { flex: 1; min-height: 0; overflow: auto; }
 .grid {
-    width: 100%; min-width: 960px;
+    /* Wide enough that no wide column is squeezed under about twenty
+       characters; past that, the table scrolls sideways. Set per table. */
+    width: 100%; min-width: var(--grid-min, 960px);
     border-collapse: separate; border-spacing: 0;
     table-layout: fixed;
 }
@@ -264,6 +269,16 @@ body {
 .row:hover td { background: var(--bg1); }
 .row-on td, .row-on:hover td { background: var(--bg2); }
 .row-on td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
+/* The name stays in view while the rest of the line scrolls under it. Its
+   cells need a background of their own for the others to pass behind. */
+.grid .col-freeze {
+    position: sticky; left: 0; z-index: 1;
+    background: var(--bg0);
+    border-right: 1px solid var(--border2);
+}
+.grid th.col-freeze { z-index: 2; background: var(--bg1); }
+.row:hover .col-freeze { background: var(--bg1); }
+.row-on .col-freeze, .row-on:hover .col-freeze { background: var(--bg2); }
 /* The column that names the line reads first. */
 .grid td:not(.col-extra):not(.w-narrow):not(.w-medium) { color: var(--text1); }
 .clamp {
@@ -280,6 +295,49 @@ body {
 .row-open:focus-visible { outline: 1px solid var(--accent); outline-offset: 3px; }
 .cell-date { font-variant-numeric: tabular-nums; white-space: nowrap; }
 .cell-empty { color: var(--text3); font-style: italic; }
+
+/* ── Cards: the table in a narrow window ──────────────────────────── */
+/* One card per line, its name first, then what stays in the grid beside
+   the editor. Hidden while the table has the room for its columns: with
+   the editor beside it, the table keeps fewer columns and holds out
+   longer. */
+.cards {
+    display: none; flex-direction: column; gap: 8px;
+    padding: 10px 14px 18px;
+}
+@container page (max-width: 680px) {
+    .grid-scroll:not(.grid-beside) > .grid { display: none; }
+    .grid-scroll:not(.grid-beside) > .cards { display: flex; }
+}
+@container page (max-width: 480px) {
+    .grid-scroll > .grid { display: none; }
+    .grid-scroll > .cards { display: flex; }
+}
+.card {
+    display: flex; flex-direction: column; gap: 6px;
+    width: 100%; padding: 11px 13px;
+    background: var(--bg1); color: var(--text2);
+    border: 1px solid var(--border2); border-left: 3px solid transparent;
+    border-radius: 8px;
+    font: inherit; font-size: 12px; line-height: 1.55; text-align: left;
+    cursor: pointer;
+    transition: background 0.12s, border-color 0.12s;
+}
+.card:hover { background: var(--bg2); border-color: var(--border); }
+.card-on, .card-on:hover { background: var(--bg2); border-color: var(--border); border-left-color: var(--accent); }
+.card:focus-visible { outline: 1px solid var(--accent); outline-offset: 2px; }
+.card-title { font-size: 13px; font-weight: 600; color: var(--text1); }
+.card-title.cell-empty { font-weight: 400; color: var(--text3); }
+.card-line { display: flex; flex-direction: column; gap: 1px; }
+.card-label {
+    font-size: 9.5px; color: var(--text3);
+    text-transform: uppercase; letter-spacing: 0.5px;
+}
+.card-meta {
+    display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px;
+    font-size: 11px; color: var(--text3);
+}
+.card-meta .clamp { display: inline; }
 
 /* ── Status pills: neutral, soft, green, amber, red ───────────────── */
 .pill {
@@ -313,6 +371,9 @@ body {
     border-left: 1px solid var(--border);
     background: var(--bg1);
 }
+/* Behind the editor once it lies over the table; see the narrow window
+   below. */
+.detail-backdrop { display: none; }
 .detail-close {
     background: none; border: none; color: var(--text3);
     font-size: 20px; line-height: 1; padding: 0 4px; cursor: pointer;
@@ -511,3 +572,61 @@ body {
     font-size: 13px; color: var(--text1); line-height: 1.7;
 }
 .guide-note { margin-top: 16px; font-size: 11.5px; color: var(--text3); line-height: 1.8; }
+
+/* ══════════════════════════════════════════════
+   NARROW WINDOWS
+   The sidebar gives up room first, then the editor lies over the table
+   instead of squeezing it, and the table turns into cards (see Cards).
+══════════════════════════════════════════════ */
+@media (max-width: 1000px) {
+    .body { position: relative; }
+    .sidebar { width: 220px; }
+    .detail-col {
+        position: absolute; top: 0; right: 0; bottom: 0; z-index: 20;
+        width: min(420px, 100%);
+        box-shadow: -12px 0 32px rgba(0, 0, 0, 0.35);
+    }
+    .detail-backdrop {
+        display: block;
+        position: absolute; inset: 0; z-index: 19;
+        background: rgba(8, 6, 16, 0.45);
+    }
+    body.light .detail-backdrop { background: rgba(39, 31, 74, 0.25); }
+    /* The table behind keeps all its columns, or its cards. */
+    .grid-compact { min-width: var(--grid-min, 960px); }
+    .grid-compact .col-extra { display: table-cell; }
+}
+@media (max-width: 1000px) {
+    @container page (max-width: 680px) {
+        .grid-scroll > .grid { display: none; }
+        .grid-scroll > .cards { display: flex; }
+    }
+}
+
+/* The sidebar down to its icons; a page's name is in its tooltip. */
+@media (max-width: 700px) {
+    .sidebar { width: 58px; }
+    .sidebar-head, .sidebar-main, .sidebar-foot { display: none; }
+    .sidebar-list { padding: 8px 6px 0; }
+    .sidebar-row { position: relative; justify-content: center; padding: 9px 0; }
+    .sidebar-section { display: block; padding: 6px 0 0; margin-top: 8px; border-top: 1px solid var(--border2); }
+    .sidebar-section > * { display: none; }
+    .sidebar-count {
+        position: absolute; top: 2px; right: 1px;
+        padding: 0 4px; font-size: 9px;
+    }
+    .detail-col { width: 100%; }
+}
+
+/* Follow-ups: the two buttons go under the line when there is no room
+   beside it. */
+@container page (max-width: 680px) {
+    .followups { padding: 4px 14px 20px; }
+    .followup { flex-wrap: wrap; }
+    .followup-main { flex-basis: calc(100% - 120px); }
+}
+@container page (max-width: 420px) {
+    .col-head { flex-wrap: wrap; }
+    .col-head-main { flex-basis: 100%; }
+    .search { flex: 1; width: auto; }
+}

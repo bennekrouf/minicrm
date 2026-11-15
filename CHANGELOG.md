@@ -1,5 +1,36 @@
 # Changelog
 
+## [Unreleased]
+
+### Added
+
+- MiniCRM fits a smaller window. Once the table no longer has room for its
+  columns, every table shows its lines as cards instead, one per line, with
+  its name first: a contact's card gives their next step, follow-up date and
+  stage. Click a card to open it, as you would a row.
+- In a narrow window the editor opens over the table instead of squeezing
+  it; click beside it or press Esc to close it. The sidebar shrinks to its
+  icons, each page's name showing when you point at it.
+- Logging an action with a contact now updates the contact too, so you no
+  longer type it twice. A message sent makes a lead Contacted, and a call or
+  an interview puts them In conversation; a contact never moves back, and
+  Proposal sent, Client and Not now stay yours to set. The action's follow-up
+  date and what to do then become the contact's next follow-up and next step,
+  and Follow-ups lists it once, under their name. Log an action with no
+  follow-up date and the follow-up they had due is marked done.
+
+### Changed
+
+- Contacts reads name first, then the next step, the next follow-up and the
+  stage, so what to do next with each person is the first thing you see. The
+  next step also stays in the table while a contact is open in the editor,
+  and CSV exports list the columns in this order.
+- Columns in every table keep room for about twenty characters, so a name
+  or a sentence is no longer broken every few letters; a table with more
+  columns than the window holds scrolls sideways instead. In Contacts and
+  Open questions the first column stays in place as you scroll, as a frozen
+  column does in a spreadsheet.
+
 ## [0.1.3] - 2026-11-15
 
 ### Fixed

@@ -30,7 +30,11 @@ const INSTRUCTIONS: &str = "MiniCRM is a solo founder's weekly cockpit: four tab
 weekly routine (goals, actions, signals, questions) and a contacts table with each person's stage, \
 from Lead to Client, and their next follow-up. Start with overview: it gives this week's numbers \
 and every table's columns, with the values each list takes. Actions (Field progress) name the \
-contact they were with; get_line on a contact gives what was done with them. follow_ups lists who \
+contact they were with; get_line on a contact gives what was done with them. An action logged \
+with a contact updates them on its own: a message sent makes a lead Contacted, a call or \
+interview puts them In conversation, and the action's follow_up_on and follow_up become their \
+follow-up and next step (with none, a follow-up due by then is cleared), so don't repeat it on \
+the contact. Proposal sent, Client and Not now are only ever set by hand. follow_ups lists who \
 to get back to. MiniCRM reads the media library PolishCast, TrackCut and PublishKit share: a post \
 that goes out is logged in actions on its own, type Post, its media cell naming it, so never log \
 it again; fill in its result and what was learned instead. An action's media cell names the video \
@@ -699,7 +703,11 @@ mod tests {
         let contacts = &o["tables"][4];
         assert_eq!(contacts["table"], "contacts");
         assert_eq!(contacts["filter_column"], "stage");
-        assert_eq!(contacts["columns"][2]["choices"][4], "Client");
+        // Named, then what to do next with them: the table's order.
+        assert_eq!(contacts["columns"][0]["key"], "name");
+        assert_eq!(contacts["columns"][1]["key"], "next");
+        assert_eq!(contacts["columns"][3]["key"], "stage");
+        assert_eq!(contacts["columns"][3]["choices"][4], "Client");
     }
 
     #[test]

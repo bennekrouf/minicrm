@@ -231,6 +231,36 @@ pub const STAGES: &[Choice] = &[
     choice("Not now", Tone::Bad),
 ];
 
+/// The cells of an action that say something about the contact it was
+/// with: writing one brings the contact up to date.
+const ACTION_KEYS_FOR_CONTACT: &[&str] = &[
+    "action",
+    "contact",
+    "type",
+    "date",
+    "follow_up",
+    "follow_up_on",
+];
+
+/// The stage a contact moves to after an action of this type, if it moves
+/// them forward. Only the early stages move on their own: Lead, Contacted
+/// and In conversation. A proposal, a client and Not now are the person's
+/// own decisions, and an action never undoes them.
+fn forward_stage(stage: &str, action_type: &str) -> Option<&'static str> {
+    let to = match action_type {
+        "Message sent" => "Contacted",
+        "Call" | "Interview" => "In conversation",
+        _ => return None,
+    };
+    let rank = |label: &str| STAGES.iter().position(|s| s.label == label);
+    let from = if stage.is_empty() {
+        Some(0)
+    } else {
+        rank(stage)
+    }?;
+    (from <= rank("In conversation")? && rank(to)? > from).then_some(to)
+}
+
 const QUESTIONS: &[Column] = &[
     col("question", "Question", Kind::Long, Width::Wide, true),
     col("why", "Why it matters", Kind::Long, Width::Wide, false),
@@ -258,10 +288,20 @@ const QUESTIONS: &[Column] = &[
     ),
 ];
 
+/// Who, then what to do next with them and when: what a glance at the
+/// table is for. Who they are and how to reach them come after.
 const CONTACTS: &[Column] = &[
     col("name", "Name", Kind::Text, Width::Wide, true),
-    col("about", "Who they are", Kind::Text, Width::Wide, false),
+    col("next", "Next step", Kind::Long, Width::Wide, true),
+    col(
+        "follow_up",
+        "Next follow-up",
+        Kind::Due,
+        Width::Narrow,
+        true,
+    ),
     col("stage", "Stage", Kind::Choice(STAGES), Width::Medium, true),
+    col("about", "Who they are", Kind::Text, Width::Wide, false),
     col(
         "source",
         "Where I found them",
@@ -271,14 +311,6 @@ const CONTACTS: &[Column] = &[
     ),
     col("link", "Profile or website", Kind::Text, Width::Wide, false),
     col("email", "Email", Kind::Text, Width::Medium, false),
-    col(
-        "follow_up",
-        "Next follow-up",
-        Kind::Due,
-        Width::Narrow,
-        true,
-    ),
-    col("next", "Next step", Kind::Long, Width::Wide, false),
     col("notes", "Notes", Kind::Long, Width::Wide, false),
 ];
 
@@ -653,10 +685,71 @@ impl Cockpit {
         }
     }
 
-    /// Writes one cell.
+    /// Writes one cell. A cell of an action logged with a contact also
+    /// brings that contact up to date: see [`Cockpit::update_contact`].
     pub fn set(&mut self, sheet: Sheet, id: u64, key: &str, value: String) {
         if let Some(row) = self.rows_mut(sheet).iter_mut().find(|r| r.id == id) {
             row.cells.insert(key.to_string(), value);
+        }
+        if sheet == Sheet::Actions && ACTION_KEYS_FOR_CONTACT.contains(&key) {
+            self.update_contact(id);
+        }
+    }
+
+    /// What logging an action with someone says about them, written on
+    /// their contact so it doesn't have to be typed twice:
+    ///
+    /// * the stage moves forward: a message sent makes a lead Contacted, a
+    ///   call or an interview puts them In conversation. It never moves
+    ///   back, and a proposal sent, a client or someone set to Not now is
+    ///   left as it is: those are the person's own calls.
+    /// * the follow-up follows the latest action with them: the action's
+    ///   own follow-up date (and what to do then) becomes the contact's
+    ///   next follow-up and next step; with no date on it, a follow-up the
+    ///   contact had due by then is done, and is cleared. An older action
+    ///   edited later changes neither.
+    ///
+    /// An action counts once it says what was done ("Action taken") and
+    /// names the contact: a new line already reads "Message sent", and
+    /// must not move anyone before it is filled in.
+    fn update_contact(&mut self, action: u64) {
+        let Some(row) = self.row(Sheet::Actions, action) else {
+            return;
+        };
+        if row.get("action").trim().is_empty() {
+            return;
+        }
+        let Some(contact) = self.contact(row.get("contact")) else {
+            return;
+        };
+        let contact_id = contact.id;
+        let date = row.get("date").to_string();
+        let due = row.get("follow_up_on").to_string();
+        let what = row.get("follow_up").trim().to_string();
+
+        let stage = forward_stage(contact.get("stage"), row.get("type"));
+        let latest = self
+            .history(contact_id)
+            .first()
+            .is_some_and(|newest| newest.get("date") <= date.as_str());
+        let follow_up = if !latest {
+            None
+        } else if !due.is_empty() {
+            Some(due)
+        } else {
+            let had = contact.get("follow_up");
+            (!had.is_empty() && had <= date.as_str()).then(String::new)
+        };
+
+        if let Some(stage) = stage {
+            self.set(Sheet::Contacts, contact_id, "stage", stage.to_string());
+        }
+        if let Some(follow_up) = follow_up {
+            let set_date = !follow_up.is_empty();
+            self.set(Sheet::Contacts, contact_id, "follow_up", follow_up);
+            if set_date && !what.is_empty() {
+                self.set(Sheet::Contacts, contact_id, "next", what);
+            }
         }
     }
 
@@ -720,6 +813,15 @@ impl Cockpit {
                     let date = row.get(date_key);
                     let urgency = Urgency::of(date, today)?;
                     if date > until {
+                        return None;
+                    }
+                    // An action's follow-up its contact took over (see
+                    // update_contact) is listed once, under the contact.
+                    if sheet == Sheet::Actions
+                        && self
+                            .contact(row.get("contact"))
+                            .is_some_and(|c| c.get("follow_up") == date)
+                    {
                         return None;
                     }
                     Some(FollowUp {
@@ -980,6 +1082,123 @@ mod tests {
             ""
         );
         assert!(cockpit.history(lea).is_empty());
+    }
+
+    fn log(cockpit: &mut Cockpit, contact: u64, cells: &[(&str, &str)]) -> u64 {
+        let id = cockpit.add(Sheet::Actions, day());
+        cockpit.set(Sheet::Actions, id, "contact", contact.to_string());
+        for (key, value) in cells {
+            cockpit.set(Sheet::Actions, id, key, value.to_string());
+        }
+        id
+    }
+
+    fn cell(cockpit: &Cockpit, contact: u64, key: &str) -> String {
+        cockpit
+            .row(Sheet::Contacts, contact)
+            .unwrap()
+            .get(key)
+            .to_string()
+    }
+
+    #[test]
+    fn logging_an_action_moves_the_contact_forward_never_back() {
+        let mut cockpit = Cockpit::default();
+        let lea = cockpit.add(Sheet::Contacts, day());
+        // A new line reads "Message sent" before anything is typed in it.
+        let id = log(&mut cockpit, lea, &[]);
+        assert_eq!(cell(&cockpit, lea, "stage"), "Lead");
+        cockpit.set(Sheet::Actions, id, "action", "Intro message".into());
+        assert_eq!(cell(&cockpit, lea, "stage"), "Contacted");
+        cockpit.set(Sheet::Actions, id, "type", "Call".into());
+        assert_eq!(cell(&cockpit, lea, "stage"), "In conversation");
+        log(
+            &mut cockpit,
+            lea,
+            &[("action", "Thanks"), ("type", "Message sent")],
+        );
+        assert_eq!(cell(&cockpit, lea, "stage"), "In conversation");
+        log(
+            &mut cockpit,
+            lea,
+            &[("action", "Pricing page"), ("type", "Research")],
+        );
+        assert_eq!(cell(&cockpit, lea, "stage"), "In conversation");
+    }
+
+    #[test]
+    fn a_proposal_a_client_or_not_now_stays_as_it_is() {
+        for stage in ["Proposal sent", "Client", "Not now"] {
+            let mut cockpit = Cockpit::default();
+            let id = cockpit.add_with(Sheet::Contacts, &[("name", "Léa"), ("stage", stage)]);
+            log(
+                &mut cockpit,
+                id,
+                &[("action", "Call"), ("type", "Interview")],
+            );
+            assert_eq!(cell(&cockpit, id, "stage"), stage);
+        }
+    }
+
+    #[test]
+    fn the_latest_action_with_a_contact_sets_their_follow_up() {
+        let mut cockpit = Cockpit::default();
+        let lea = cockpit.add_with(
+            Sheet::Contacts,
+            &[
+                ("name", "Léa"),
+                ("follow_up", "2026-11-09"),
+                ("next", "Send the offer"),
+            ],
+        );
+        // Getting back to her, with no date for the next time: done.
+        let id = log(&mut cockpit, lea, &[("action", "Sent the offer")]);
+        assert_eq!(cell(&cockpit, lea, "follow_up"), "");
+        assert_eq!(cell(&cockpit, lea, "next"), "Send the offer");
+        // A follow-up on the action becomes hers.
+        cockpit.set(Sheet::Actions, id, "follow_up_on", "2026-11-18".into());
+        cockpit.set(
+            Sheet::Actions,
+            id,
+            "follow_up",
+            "Ask what she thinks".into(),
+        );
+        assert_eq!(cell(&cockpit, lea, "follow_up"), "2026-11-18");
+        assert_eq!(cell(&cockpit, lea, "next"), "Ask what she thinks");
+        // Listed once, under her name.
+        let until = NaiveDate::from_ymd_opt(2026, 11, 30).unwrap();
+        let due: Vec<(Sheet, u64)> = cockpit
+            .due_by(day(), until)
+            .iter()
+            .map(|f| (f.sheet, f.id))
+            .collect();
+        assert_eq!(due, vec![(Sheet::Contacts, lea)]);
+        // An older action, written up later, changes nothing.
+        log(
+            &mut cockpit,
+            lea,
+            &[
+                ("date", "2026-11-02"),
+                ("action", "First call"),
+                ("follow_up_on", "2026-11-12"),
+            ],
+        );
+        assert_eq!(cell(&cockpit, lea, "follow_up"), "2026-11-18");
+    }
+
+    #[test]
+    fn a_follow_up_still_to_come_is_kept() {
+        let mut cockpit = Cockpit::default();
+        let lea = cockpit.add_with(
+            Sheet::Contacts,
+            &[("name", "Léa"), ("follow_up", "2026-11-20")],
+        );
+        log(
+            &mut cockpit,
+            lea,
+            &[("action", "Liked her post"), ("type", "Other")],
+        );
+        assert_eq!(cell(&cockpit, lea, "follow_up"), "2026-11-20");
     }
 
     #[test]
