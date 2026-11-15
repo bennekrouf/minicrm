@@ -33,7 +33,7 @@ and every table's columns, with the values each list takes. Actions (Field progr
 contact they were with; get_line on a contact gives what was done with them. An action logged \
 with a contact updates them on its own: a message sent makes a lead Contacted, a call or \
 interview puts them In conversation, and the action's follow_up_on and follow_up become their \
-follow-up and next step (with none, a follow-up due by then is cleared), so don't repeat it on \
+follow-up and next step (with none, their follow-up stays as it was), so don't repeat it on \
 the contact. Proposal sent, Client and Not now are only ever set by hand. follow_ups lists who \
 to get back to. MiniCRM reads the media library PolishCast, TrackCut and PublishKit share: a post \
 that goes out is logged in actions on its own, type Post, its media cell naming it, so never log \
