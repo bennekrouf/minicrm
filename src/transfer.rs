@@ -433,7 +433,7 @@ mod tests {
     fn a_file_that_matches_nothing_says_so() {
         let mut cockpit = Cockpit::default();
         let err = import(&mut cockpit, Sheet::Contacts, "a,b\n1,2\n", day()).unwrap_err();
-        assert!(err.contains("Name, Who they are, Stage"), "{err}");
+        assert!(err.contains("Name, Next step, Next follow-up"), "{err}");
         assert!(cockpit.contacts.is_empty());
     }
 

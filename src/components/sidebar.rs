@@ -29,6 +29,7 @@ pub fn Sidebar() -> Element {
             div { class: "sidebar-list",
                 button {
                     class: row(current == View::Guide),
+                    title: "How it works",
                     onclick: move |_| ui.go(View::Guide),
                     span { class: "step-num", "?" }
                     div { class: "sidebar-main",
@@ -40,6 +41,7 @@ pub fn Sidebar() -> Element {
                     button {
                         key: "{sheet.title()}",
                         class: row(current == View::Sheet(sheet)),
+                        title: "{sheet.title()}",
                         onclick: move |_| ui.go(View::Sheet(sheet)),
                         span { class: "step-num", "{index + 1}" }
                         div { class: "sidebar-main",
@@ -54,6 +56,7 @@ pub fn Sidebar() -> Element {
                 }
                 button {
                     class: row(current == View::Sheet(Sheet::Contacts)),
+                    title: "{Sheet::Contacts.title()}",
                     onclick: move |_| ui.go(View::Sheet(Sheet::Contacts)),
                     span { class: "step-num", "@" }
                     div { class: "sidebar-main",
@@ -64,6 +67,7 @@ pub fn Sidebar() -> Element {
                 }
                 button {
                     class: row(current == View::FollowUps),
+                    title: "Follow-ups",
                     onclick: move |_| ui.go(View::FollowUps),
                     span { class: "step-num", "\u{21bb}" }
                     div { class: "sidebar-main",

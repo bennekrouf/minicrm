@@ -88,17 +88,45 @@ fn visible(
     kept
 }
 
-fn column_class(column: &Column) -> String {
+fn column_class(sheet: Sheet, column: &Column) -> String {
     let width = match column.width {
         Width::Narrow => "w-narrow",
         Width::Medium => "w-medium",
         Width::Wide => "w-wide",
     };
-    if column.primary {
-        width.to_string()
-    } else {
-        format!("{width} col-extra")
+    let mut class = width.to_string();
+    if !column.primary {
+        class.push_str(" col-extra");
     }
+    if frozen(sheet, column) {
+        class.push_str(" col-freeze");
+    }
+    class
+}
+
+/// The column that names a line stays put when the table scrolls sideways,
+/// as a frozen first column does in a spreadsheet: when it is the first.
+fn frozen(sheet: Sheet, column: &Column) -> bool {
+    sheet.columns().first().map(|c| c.key) == Some(column.key) && column.key == sheet.title_key()
+}
+
+/// Room a wide column keeps, at the least: about twenty characters, so a
+/// name or a sentence is not broken every few letters.
+const WIDE_MIN: u32 = 170;
+
+/// The width under which the table scrolls sideways rather than squeezing
+/// its columns: the narrow and medium ones as the stylesheet sets them
+/// (`.w-narrow`, `.w-medium`), the wide ones at [`WIDE_MIN`].
+fn min_width(sheet: Sheet) -> u32 {
+    sheet
+        .columns()
+        .iter()
+        .map(|c| match c.width {
+            Width::Narrow => 116,
+            Width::Medium => 168,
+            Width::Wide => WIDE_MIN,
+        })
+        .sum()
 }
 
 #[component]
@@ -122,9 +150,11 @@ pub fn SheetView(sheet: Sheet) -> Element {
     // be anywhere once sorted: bring it into view.
     use_effect(move || {
         if (ui.selected)().is_some() {
+            // The table's row or the card, whichever the window's width
+            // shows; the other is hidden and does not move.
             document::eval(
-                "requestAnimationFrame(() => document.querySelector('tr.row-on')\
-                 ?.scrollIntoView({ block: 'nearest' }));",
+                "requestAnimationFrame(() => document.querySelectorAll('.row-on, .card-on')\
+                 .forEach(e => e.scrollIntoView({ block: 'nearest' })));",
             );
         }
     });
@@ -263,14 +293,16 @@ pub fn SheetView(sheet: Sheet) -> Element {
                     }
                 }
             } else {
-                div { class: "grid-scroll",
-                    table { class: if open.is_some() { "grid grid-compact" } else { "grid" },
+                div { class: if open.is_some() { "grid-scroll grid-beside" } else { "grid-scroll" },
+                    table {
+                        class: if open.is_some() { "grid grid-compact" } else { "grid" },
+                        style: "--grid-min: {min_width(sheet)}px",
                         thead {
                             tr {
                                 for (index, column) in columns.iter().enumerate() {
                                     th {
                                         key: "{column.key}",
-                                        class: column_class(column),
+                                        class: column_class(sheet, column),
                                         title: "Sort by \u{201c}{column.label}\u{201d}",
                                         onclick: move |_| {
                                             // Ascending, descending, then back
@@ -304,7 +336,7 @@ pub fn SheetView(sheet: Sheet) -> Element {
                                         class: if open == Some(id) { "row row-on" } else { "row" },
                                         onclick: move |_| ui.selected.set(Some(id)),
                                         for column in columns {
-                                            td { key: "{column.key}", class: column_class(column),
+                                            td { key: "{column.key}", class: column_class(sheet, column),
                                                 {cell(sheet, column, &cockpit.read().display(column, row), today)}
                                             }
                                         }
@@ -313,11 +345,103 @@ pub fn SheetView(sheet: Sheet) -> Element {
                             })}
                         }
                     }
+                    // The same lines as cards, which the stylesheet shows
+                    // instead of the table once the window is too narrow
+                    // for its columns.
+                    div { class: "cards",
+                        {rows.iter().map(|row| {
+                            let id = row.id;
+                            rsx! {
+                                Card {
+                                    key: "{id}",
+                                    sheet,
+                                    row: row.clone(),
+                                    on: open == Some(id),
+                                }
+                            }
+                        })}
+                    }
                 }
             }
         }
         if let Some(id) = open {
+            // Behind the editor when it lies over the table, in a narrow
+            // window: a click beside it closes it, as Esc does.
+            div { class: "detail-backdrop", onclick: move |_| ui.selected.set(None) }
             Detail { sheet, id }
+        }
+    }
+}
+
+/// What a card shows of a line, under its name: the columns that stay in
+/// the grid beside the editor, as text lines (a contact's next step) and as
+/// a row of pills and dates (their follow-up and stage), each in the
+/// table's order.
+fn card_parts(sheet: Sheet) -> (Vec<&'static Column>, Vec<&'static Column>) {
+    sheet
+        .columns()
+        .iter()
+        .filter(|c| c.primary && c.key != sheet.title_key())
+        .partition(|c| {
+            matches!(
+                c.kind,
+                Kind::Text | Kind::Long | Kind::Contact | Kind::Media
+            )
+        })
+}
+
+/// One line as a card, for a narrow window. A click opens it in the editor,
+/// as a click on its row does.
+#[component]
+fn Card(sheet: Sheet, row: Row, on: bool) -> Element {
+    let mut ui = use_context::<Ui>();
+    let cockpit = use_context::<Signal<Cockpit>>();
+    let today = (ui.today)();
+    let id = row.id;
+    let title = row.get(sheet.title_key()).trim().to_string();
+    let (lines, meta) = card_parts(sheet);
+    let cockpit = cockpit.read();
+    let lines: Vec<(&str, String)> = lines
+        .into_iter()
+        .map(|c| (c.label, cockpit.display(c, &row)))
+        .filter(|(_, v)| !v.trim().is_empty())
+        .collect();
+    let meta: Vec<Element> = meta
+        .into_iter()
+        .map(|c| (c, cockpit.display(c, &row)))
+        .filter(|(_, v)| !v.trim().is_empty())
+        .map(|(c, value)| {
+            // A bare "1" says nothing on a card: "Priority 1" does.
+            let value = if value.chars().all(|ch| ch.is_ascii_digit()) {
+                format!("{} {value}", c.label)
+            } else {
+                value
+            };
+            rsx! {
+                span { key: "{c.key}", title: "{c.label}", {cell(sheet, c, &value, today)} }
+            }
+        })
+        .collect();
+
+    rsx! {
+        button {
+            class: if on { "card card-on" } else { "card" },
+            title: "Open this line",
+            onclick: move |_| ui.selected.set(Some(id)),
+            if title.is_empty() {
+                span { class: "card-title cell-empty", "To fill in" }
+            } else {
+                span { class: "card-title clamp", "{title}" }
+            }
+            for (label, value) in lines {
+                span { key: "{label}", class: "card-line",
+                    span { class: "card-label", "{label}" }
+                    span { class: "clamp", "{value}" }
+                }
+            }
+            if !meta.is_empty() {
+                span { class: "card-meta", {meta.into_iter()} }
+            }
         }
     }
 }
@@ -462,6 +586,34 @@ mod tests {
                 "Tom Leroy",
             ]
         );
+    }
+
+    #[test]
+    fn a_contact_card_reads_their_next_step_then_when_and_where_they_stand() {
+        let keys = |cols: Vec<&Column>| cols.iter().map(|c| c.key).collect::<Vec<_>>();
+        let (lines, meta) = card_parts(Sheet::Contacts);
+        assert_eq!(keys(lines), vec!["next"]);
+        assert_eq!(keys(meta), vec!["follow_up", "stage"]);
+        let (lines, meta) = card_parts(Sheet::Actions);
+        assert_eq!(keys(lines), vec!["contact"]);
+        assert_eq!(keys(meta), vec!["date", "type"]);
+        // Every table's card has something under its name.
+        for sheet in Sheet::ALL {
+            let (lines, meta) = card_parts(sheet);
+            assert!(!lines.is_empty() || !meta.is_empty(), "{sheet:?}");
+        }
+    }
+
+    #[test]
+    fn a_table_scrolls_sideways_before_its_wide_columns_get_too_narrow() {
+        // Name, Next step, Who they are, Profile, Notes at 170; Next
+        // follow-up narrow; Stage, Where I found them, Email medium.
+        assert_eq!(min_width(Sheet::Contacts), 5 * 170 + 116 + 3 * 168);
+        let name = &Sheet::Contacts.columns()[0];
+        assert!(frozen(Sheet::Contacts, name));
+        assert!(column_class(Sheet::Contacts, name).contains("col-freeze"));
+        // A goal's first column is its week, which is not worth freezing.
+        assert!(!frozen(Sheet::Goals, &Sheet::Goals.columns()[0]));
     }
 
     #[test]
