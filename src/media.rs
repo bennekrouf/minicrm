@@ -67,10 +67,11 @@ pub fn place(item: &Item) -> String {
     }
 }
 
-/// What an item is, as people say it: `LinkedIn post`, `Blog post`, `Video`.
+/// What an item is, as people say it: `LinkedIn post`, `Blog post`, `Video`,
+/// or `Social post` for a post planned before its network is chosen.
 pub fn what(item: &Item) -> String {
     match item.kind {
-        Kind::Social => format!("{} post", place(item)),
+        Kind::Social if item.network.is_some() => format!("{} post", place(item)),
         kind => kind.label().into(),
     }
 }
@@ -148,4 +149,22 @@ pub fn app_name(item: &Item) -> &str {
         return "its app";
     }
     desktop_kit::launch::name(&item.app)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_post_reads_as_where_it_goes_out() {
+        let mut post = Item::new("p", "publishkit", Kind::Social, "Launch", Status::Queued);
+        post.network = Some("linkedin".into());
+        assert_eq!(what(&post), "LinkedIn post");
+
+        let planned = Item::new("plan:1", "library", Kind::Social, "Launch", Status::Planned);
+        assert_eq!(what(&planned), "Social post");
+
+        let blog = Item::new("b", "publishkit", Kind::Blog, "Why", Status::Planned);
+        assert_eq!(what(&blog), "Blog post");
+    }
 }
