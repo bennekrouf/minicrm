@@ -1,5 +1,11 @@
 # Changelog
 
+## [Unreleased]
+
+### Changed
+
+- Build and packaging only — no user-visible change.
+
 ## [0.1.1] - 2026-11-14
 
 ### Added
