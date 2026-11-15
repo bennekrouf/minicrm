@@ -1,5 +1,13 @@
 # Changelog
 
+## [Unreleased]
+
+### Fixed
+
+- A post planned in the content calendar before you pick its network now reads
+  "Social post" in the Video or post list and in the history, instead of
+  "Social post post".
+
 ## [0.1.2] - 2026-11-15
 
 ### Changed
