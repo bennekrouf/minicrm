@@ -35,7 +35,10 @@ with a contact updates them on its own: a message sent makes a lead Contacted, a
 interview puts them In conversation, and the action's follow_up_on and follow_up become their \
 follow-up and next step (with none, their follow-up stays as it was), so don't repeat it on \
 the contact. Proposal sent, Client and Not now are only ever set by hand. follow_ups lists who \
-to get back to. MiniCRM reads the media library PolishCast, TrackCut and PublishKit share: a post \
+to get back to. A line done with, such as a contact set to Not now or last month's goals, is \
+archived with archive_line rather than deleted: it leaves the table, the counts and follow-ups, \
+and list_lines with archived: true finds it. list_lines gives a page at a time: carry on from \
+its next_offset. MiniCRM reads the media library PolishCast, TrackCut and PublishKit share: a post \
 that goes out is logged in actions on its own, type Post, its media cell naming it, so never log \
 it again; fill in its result and what was learned instead. An action's media cell names the video \
 or post it was about, such as a demo made for a contact, by media library id or title; overview \
@@ -99,6 +102,7 @@ fn run(cockpit: &mut Cockpit, name: &str, args: &Value, today: NaiveDate) -> Res
             cockpit.remove(sheet, id);
             Ok(json!({ "deleted": id, "table": sheet.id(), "was": title }))
         }
+        "archive_line" => archive_line(cockpit, args),
         "follow_ups" => follow_ups(cockpit, args, today),
         "set_follow_up" => set_follow_up(cockpit, args, today),
         "import_csv" => {
@@ -165,7 +169,8 @@ fn overview(cockpit: &Cockpit, library: &[Item], today: NaiveDate) -> Value {
                 "table": sheet.id(),
                 "title": sheet.title(),
                 "answers": sheet.question(),
-                "lines": cockpit.rows(*sheet).len(),
+                "lines": cockpit.active(*sheet).count(),
+                "archived": cockpit.archived(*sheet),
                 "filter_column": sheet.filter_column().key,
                 "columns": columns,
             })
@@ -231,10 +236,13 @@ fn list_lines(cockpit: &Cockpit, args: &Value) -> Result<Value, String> {
     let limit = args["limit"]
         .as_u64()
         .map_or(LIST_DEFAULT, |n| (n as usize).clamp(1, LIST_MAX));
+    let offset = args["offset"].as_u64().unwrap_or(0) as usize;
+    let archived = args["archived"].as_bool().unwrap_or(false);
 
-    let kept: Vec<&Row> = cockpit
+    let mut kept: Vec<&Row> = cockpit
         .rows(sheet)
         .iter()
+        .filter(|r| r.archived == archived)
         .filter(|r| {
             filter
                 .as_deref()
@@ -250,16 +258,65 @@ fn list_lines(cockpit: &Cockpit, args: &Value) -> Result<Value, String> {
             })
         })
         .collect();
+    if args["newest_first"].as_bool().unwrap_or(false) {
+        kept.reverse();
+    }
     let lines: Vec<Value> = kept
         .iter()
+        .skip(offset)
         .take(limit)
         .map(|r| row_json(cockpit, sheet, r))
         .collect();
+    let next = offset + lines.len();
     Ok(json!({
         "table": sheet.id(),
+        "archived": archived,
         "matching": kept.len(),
+        "offset": offset,
         "shown": lines.len(),
+        // Where the next page starts; null once this one reaches the end.
+        "next_offset": if next < kept.len() { json!(next) } else { Value::Null },
         "lines": lines,
+    }))
+}
+
+/// Archives lines, or brings them back with `restore`: one by `id` (or a
+/// contact by `name`), or several by `ids`.
+fn archive_line(cockpit: &mut Cockpit, args: &Value) -> Result<Value, String> {
+    let sheet = table(args)?;
+    let restore = args["restore"].as_bool().unwrap_or(false);
+    let ids: Vec<u64> = match args["ids"].as_array() {
+        Some(list) => list
+            .iter()
+            .map(|v| {
+                let id = v
+                    .as_u64()
+                    .ok_or(format!("ids are line ids: {v} is not one"))?;
+                cockpit
+                    .row(sheet, id)
+                    .map(|r| r.id)
+                    .ok_or_else(|| format!("{} has no line {id}", sheet.id()))
+            })
+            .collect::<Result<_, _>>()?,
+        None => vec![line_id(cockpit, sheet, args)?],
+    };
+    let lines: Vec<Value> = ids
+        .iter()
+        .map(|&id| {
+            cockpit.set_archived(sheet, id, !restore);
+            let title = cockpit
+                .row(sheet, id)
+                .map(|r| r.get(sheet.title_key()).to_string())
+                .unwrap_or_default();
+            json!({ "id": id, "title": title })
+        })
+        .collect();
+    Ok(json!({
+        "table": sheet.id(),
+        "done": if restore { "restored" } else { "archived" },
+        "lines": lines,
+        "lines_in_use": cockpit.active(sheet).count(),
+        "lines_archived": cockpit.archived(sheet),
     }))
 }
 
@@ -345,6 +402,9 @@ fn set_follow_up(cockpit: &mut Cockpit, args: &Value, today: NaiveDate) -> Resul
 fn row_json(cockpit: &Cockpit, sheet: Sheet, row: &Row) -> Value {
     let mut out = Map::new();
     out.insert("id".into(), json!(row.id));
+    if row.archived {
+        out.insert("archived".into(), json!(true));
+    }
     for column in sheet.columns() {
         let value = cockpit.display(column, row);
         if !value.is_empty() {
@@ -584,13 +644,16 @@ fn tools() -> Value {
         },
         {
             "name": "list_lines",
-            "description": "The lines of a table, in the order they were added.",
+            "description": "The lines of a table in use, in the order they were added, a page at a time: next_offset says where the next page starts (null at the end). Archived lines only with archived: true.",
             "inputSchema": { "type": "object", "required": ["table"], "properties": {
                 "table": table,
                 "filter": { "type": "string", "description": "A value of the table's filter column (overview's filter_column): a stage for contacts, a status for goals, a type for actions." },
                 "contact": { "type": "string", "description": "Actions only: those with this contact, by name or id." },
                 "text": { "type": "string", "description": "Only lines with this text in any column." },
                 "limit": { "type": "integer", "minimum": 1, "maximum": LIST_MAX, "description": "Default 50." },
+                "offset": { "type": "integer", "minimum": 0, "description": "Lines to skip: the previous page's next_offset. Default 0." },
+                "newest_first": { "type": "boolean", "description": "The latest added first." },
+                "archived": { "type": "boolean", "description": "The archived lines instead of those in use." },
             }},
             "annotations": read_only,
         },
@@ -618,11 +681,21 @@ fn tools() -> Value {
         },
         {
             "name": "delete_line",
-            "description": "Deletes a line for good. A deleted contact's actions stay, tied to no one. Ask the user first.",
+            "description": "Deletes a line for good. A deleted contact's actions stay, tied to no one. To put a line out of the way, archive_line it instead. Ask the user first.",
             "inputSchema": { "type": "object", "required": ["table"], "properties": {
                 "table": table, "id": id, "name": name,
             }},
             "annotations": { "destructiveHint": true },
+        },
+        {
+            "name": "archive_line",
+            "description": "Archives lines: they are kept, a contact with what was done with them, but leave the table, its counts and follow-ups. restore: true brings them back.",
+            "inputSchema": { "type": "object", "required": ["table"], "properties": {
+                "table": table, "id": id, "name": name,
+                "ids": { "type": "array", "items": { "type": "integer" }, "description": "Several lines at once, by id, instead of id or name." },
+                "restore": { "type": "boolean", "description": "Bring archived lines back into the table." },
+            }},
+            "annotations": { "idempotentHint": true },
         },
         {
             "name": "follow_ups",
@@ -874,6 +947,96 @@ mod tests {
         )
         .unwrap();
         assert_eq!(list["matching"], 0);
+    }
+
+    #[test]
+    fn a_long_table_is_read_a_page_at_a_time() {
+        let mut c = Cockpit::default();
+        for n in 0..250 {
+            c.add_with(Sheet::Contacts, &[("name", &format!("Person {n}"))]);
+        }
+        let first = go(
+            &mut c,
+            "list_lines",
+            json!({ "table": "contacts", "limit": 200 }),
+        )
+        .unwrap();
+        assert_eq!(first["matching"], 250);
+        assert_eq!(first["shown"], 200);
+        assert_eq!(first["next_offset"], 200);
+        let rest = go(
+            &mut c,
+            "list_lines",
+            json!({ "table": "contacts", "limit": 200, "offset": 200 }),
+        )
+        .unwrap();
+        assert_eq!(rest["shown"], 50);
+        assert_eq!(rest["lines"][49]["name"], "Person 249");
+        assert_eq!(rest["next_offset"], Value::Null);
+        let newest = go(
+            &mut c,
+            "list_lines",
+            json!({ "table": "contacts", "limit": 1, "newest_first": true }),
+        )
+        .unwrap();
+        assert_eq!(newest["lines"][0]["name"], "Person 249");
+    }
+
+    #[test]
+    fn an_archived_contact_leaves_the_list_and_comes_back() {
+        let mut c = examples();
+        let done = go(
+            &mut c,
+            "archive_line",
+            json!({ "table": "contacts", "name": "Tom Leroy" }),
+        )
+        .unwrap();
+        assert_eq!(done["done"], "archived");
+        assert_eq!(done["lines"][0]["title"], "Tom Leroy");
+        assert_eq!(done["lines_in_use"], 4);
+
+        let list = go(&mut c, "list_lines", json!({ "table": "contacts" })).unwrap();
+        assert_eq!(list["matching"], 4);
+        let put_away = go(
+            &mut c,
+            "list_lines",
+            json!({ "table": "contacts", "archived": true }),
+        )
+        .unwrap();
+        assert_eq!(put_away["lines"][0]["name"], "Tom Leroy");
+        assert_eq!(put_away["lines"][0]["archived"], true);
+        let o = go(&mut c, "overview", json!({})).unwrap();
+        assert_eq!(o["tables"][4]["lines"], 4);
+        assert_eq!(o["tables"][4]["archived"], 1);
+
+        // Several at once, by id, and back again.
+        let goals: Vec<u64> = c.goals.iter().map(|r| r.id).collect();
+        go(
+            &mut c,
+            "archive_line",
+            json!({ "table": "goals", "ids": goals }),
+        )
+        .unwrap();
+        assert_eq!(c.active(Sheet::Goals).count(), 0);
+        let err = go(
+            &mut c,
+            "archive_line",
+            json!({ "table": "goals", "ids": [999] }),
+        );
+        assert!(err.unwrap_err().contains("no line 999"));
+        go(
+            &mut c,
+            "archive_line",
+            json!({ "table": "goals", "ids": goals, "restore": true }),
+        )
+        .unwrap();
+        go(
+            &mut c,
+            "archive_line",
+            json!({ "table": "contacts", "name": "Tom Leroy", "restore": true }),
+        )
+        .unwrap();
+        assert_eq!(c, examples());
     }
 
     #[test]

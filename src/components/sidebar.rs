@@ -48,7 +48,7 @@ pub fn Sidebar() -> Element {
                             div { class: "sidebar-label", "{sheet.title()}" }
                             div { class: "sidebar-sub", "{sheet.question()}" }
                         }
-                        span { class: "sidebar-count", "{cockpit.read().rows(sheet).len()}" }
+                        span { class: "sidebar-count", "{cockpit.read().active(sheet).count()}" }
                     }
                 }
                 div { class: "sidebar-head sidebar-section",
@@ -63,7 +63,7 @@ pub fn Sidebar() -> Element {
                         div { class: "sidebar-label", "{Sheet::Contacts.title()}" }
                         div { class: "sidebar-sub", "Who they are and where they stand" }
                     }
-                    span { class: "sidebar-count", "{cockpit.read().contacts.len()}" }
+                    span { class: "sidebar-count", "{cockpit.read().active(Sheet::Contacts).count()}" }
                 }
                 button {
                     class: row(current == View::FollowUps),

@@ -540,6 +540,10 @@ pub struct Row {
     pub id: u64,
     #[serde(default)]
     pub cells: BTreeMap<String, String>,
+    /// Put away: kept, with its history, but out of its table, the counts
+    /// and Follow-ups until it is restored.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub archived: bool,
 }
 
 impl Row {
@@ -656,8 +660,34 @@ impl Cockpit {
 
     fn push(&mut self, sheet: Sheet, cells: BTreeMap<String, String>) -> u64 {
         let id = self.next_id();
-        self.rows_mut(sheet).push(Row { id, cells });
+        self.rows_mut(sheet).push(Row {
+            id,
+            cells,
+            archived: false,
+        });
         id
+    }
+
+    /// The lines of a table still in use, archived ones left out.
+    pub fn active(&self, sheet: Sheet) -> impl Iterator<Item = &Row> {
+        self.rows(sheet).iter().filter(|r| !r.archived)
+    }
+
+    /// How many lines of a table are archived.
+    pub fn archived(&self, sheet: Sheet) -> usize {
+        self.rows(sheet).iter().filter(|r| r.archived).count()
+    }
+
+    /// Archives a line, or brings it back when `archived` is false. False
+    /// when the table has no such line.
+    pub fn set_archived(&mut self, sheet: Sheet, id: u64, archived: bool) -> bool {
+        match self.rows_mut(sheet).iter_mut().find(|r| r.id == id) {
+            Some(row) => {
+                row.archived = archived;
+                true
+            }
+            None => false,
+        }
     }
 
     /// Copies a line, right under the one it copies. Returns the copy's id.
@@ -667,6 +697,8 @@ impl Cockpit {
         let at = rows.iter().position(|r| r.id == id)?;
         let mut copy = rows[at].clone();
         copy.id = new_id;
+        // A copy is made to be worked on: it goes in the table.
+        copy.archived = false;
         rows.insert(at + 1, copy);
         Some(new_id)
     }
@@ -800,7 +832,7 @@ impl Cockpit {
             .into_iter()
             .filter_map(|sheet| Some((sheet, sheet.follow_up()?)))
             .flat_map(|(sheet, (date_key, what_key))| {
-                self.rows(sheet).iter().filter_map(move |row| {
+                self.active(sheet).filter_map(move |row| {
                     let date = row.get(date_key);
                     let urgency = Urgency::of(date, today)?;
                     if date > until {
@@ -920,12 +952,9 @@ impl Cockpit {
         self.log_posts(items, today);
     }
 
-    /// How many lines of a table have `label` in the column `key`.
+    /// How many lines of a table in use have `label` in the column `key`.
     pub fn count(&self, sheet: Sheet, key: &str, label: &str) -> usize {
-        self.rows(sheet)
-            .iter()
-            .filter(|r| r.get(key) == label)
-            .count()
+        self.active(sheet).filter(|r| r.get(key) == label).count()
     }
 }
 
@@ -1421,5 +1450,60 @@ mod tests {
             cockpit.row(Sheet::Goals, goal).unwrap().get("media"),
             "polishcast:demo"
         );
+    }
+
+    #[test]
+    fn an_archived_line_is_kept_but_out_of_the_counts_and_follow_ups() {
+        let mut cockpit = crate::seed::examples(day());
+        let sophie = cockpit.contact_named("Sophie Durand").unwrap().id;
+        let due = cockpit.follow_ups(day()).len();
+        let stage = cockpit
+            .row(Sheet::Contacts, sophie)
+            .unwrap()
+            .get("stage")
+            .to_string();
+        let at_stage = cockpit.count(Sheet::Contacts, "stage", &stage);
+
+        assert!(cockpit.set_archived(Sheet::Contacts, sophie, true));
+        assert_eq!(cockpit.archived(Sheet::Contacts), 1);
+        assert_eq!(cockpit.active(Sheet::Contacts).count(), 4);
+        assert_eq!(
+            cockpit.count(Sheet::Contacts, "stage", &stage),
+            at_stage - 1
+        );
+        assert!(cockpit
+            .follow_ups(day())
+            .iter()
+            .all(|f| f.title != "Sophie Durand"));
+        assert!(cockpit.follow_ups(day()).len() < due);
+        // Still found by name, and what was done with her stays.
+        assert_eq!(
+            cockpit.contact_named("sophie durand").map(|r| r.id),
+            Some(sophie)
+        );
+        assert!(!cockpit.history(sophie).is_empty());
+
+        // A copy goes in the table; the original is brought back as it was.
+        let copy = cockpit.duplicate(Sheet::Contacts, sophie).unwrap();
+        assert!(!cockpit.row(Sheet::Contacts, copy).unwrap().archived);
+        cockpit.remove(Sheet::Contacts, copy);
+        assert!(cockpit.set_archived(Sheet::Contacts, sophie, false));
+        assert_eq!(cockpit.follow_ups(day()).len(), due);
+        assert!(
+            !cockpit.set_archived(Sheet::Goals, sophie, true),
+            "not a goal"
+        );
+    }
+
+    #[test]
+    fn only_an_archived_line_says_so_in_the_file() {
+        let mut cockpit = Cockpit::default();
+        let a = cockpit.add_with(Sheet::Goals, &[("goal", "A")]);
+        cockpit.add_with(Sheet::Goals, &[("goal", "B")]);
+        cockpit.set_archived(Sheet::Goals, a, true);
+        let json = serde_json::to_string(&cockpit).unwrap();
+        assert_eq!(json.matches("archived").count(), 1, "{json}");
+        let back: Cockpit = serde_json::from_str(&json).unwrap();
+        assert_eq!(back, cockpit);
     }
 }

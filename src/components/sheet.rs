@@ -54,11 +54,12 @@ fn mentions(cockpit: &Cockpit, sheet: Sheet, row: &Row, needle: &str) -> bool {
         .any(|c| cockpit.display(c, row).to_lowercase().contains(needle))
 }
 
-/// The lines to show: those the filter and the search keep, in the sort's
-/// order.
+/// The lines to show: those in use, or the archived ones when `archived`,
+/// that the filter and the search keep, in the sort's order.
 fn visible(
     cockpit: &Cockpit,
     sheet: Sheet,
+    archived: bool,
     filter: Option<&str>,
     search: &str,
     sort: Option<(usize, bool)>,
@@ -68,6 +69,7 @@ fn visible(
     let mut kept: Vec<Row> = cockpit
         .rows(sheet)
         .iter()
+        .filter(|r| r.archived == archived)
         .filter(|r| filter.is_none_or(|f| r.get(filter_key) == f))
         .filter(|r| needle.is_empty() || mentions(cockpit, sheet, r, &needle))
         .cloned()
@@ -140,8 +142,20 @@ pub fn SheetView(sheet: Sheet) -> Element {
     let filter = (ui.filter)();
     let sort = (ui.sort)();
     let today = (ui.today)();
-    let total = cockpit.read().rows(sheet).len();
-    let rows = visible(&cockpit.read(), sheet, filter, &search, sort);
+    let archived = (ui.archived)();
+    let put_away = cockpit.read().archived(sheet);
+    let in_use = cockpit.read().rows(sheet).len() - put_away;
+    // The lines of the view open: in use, or archived.
+    let total = if archived { put_away } else { in_use };
+    let at = |label: &str| {
+        cockpit
+            .read()
+            .rows(sheet)
+            .iter()
+            .filter(|r| r.archived == archived && r.get(filter_column.key) == label)
+            .count()
+    };
+    let rows = visible(&cockpit.read(), sheet, archived, filter, &search, sort);
     // A line deleted, or one of another table, is not open.
     let open = (ui.selected)().filter(|id| cockpit.read().row(sheet, *id).is_some());
     let narrowed = filter.is_some() || !search.trim().is_empty();
@@ -163,8 +177,16 @@ pub fn SheetView(sheet: Sheet) -> Element {
         div { class: "main-col",
             div { class: "col-head",
                 div { class: "col-head-main",
-                    div { class: "col-title", "{sheet.title()}" }
-                    div { class: "col-sub", "{sheet.question()}" }
+                    div { class: "col-title",
+                        if archived { "{sheet.title()} \u{b7} Archived" } else { "{sheet.title()}" }
+                    }
+                    div { class: "col-sub",
+                        if archived {
+                            "Put away: out of the table, its counts and Follow-ups. Open one to restore it."
+                        } else {
+                            "{sheet.question()}"
+                        }
+                    }
                 }
                 input {
                     class: "search",
@@ -180,6 +202,7 @@ pub fn SheetView(sheet: Sheet) -> Element {
                         // filtered out a moment ago.
                         ui.filter.set(None);
                         ui.search.set(String::new());
+                        ui.archived.set(false);
                         let id = cockpit.write().add(sheet, today);
                         ui.selected.set(Some(id));
                     },
@@ -211,9 +234,19 @@ pub fn SheetView(sheet: Sheet) -> Element {
                         class: if filter == Some(option.label) { "chip chip-on" } else { "chip" },
                         onclick: move |_| ui.filter.set(Some(option.label)),
                         "{option.label}"
-                        span { class: "chip-count",
-                            "{cockpit.read().count(sheet, filter_column.key, option.label)}"
-                        }
+                        span { class: "chip-count", "{at(option.label)}" }
+                    }
+                }
+                if put_away > 0 || archived {
+                    button {
+                        class: if archived { "chip chip-on chip-archive" } else { "chip chip-archive" },
+                        title: if archived { "Back to the lines in use" } else { "The lines put away" },
+                        onclick: move |_| {
+                            ui.selected.set(None);
+                            ui.archived.set(!archived);
+                        },
+                        "Archived"
+                        span { class: "chip-count", "{put_away}" }
                     }
                 }
                 div { class: "filters-tools",
@@ -285,6 +318,12 @@ pub fn SheetView(sheet: Sheet) -> Element {
                             },
                             "Show all"
                         }
+                    } else if archived {
+                        div { class: "placeholder-title", "Nothing archived" }
+                        div { class: "placeholder-sub",
+                            "A line you archive from its editor waits here, out of the way, until you restore it."
+                        }
+                        button { class: "btn", onclick: move |_| ui.archived.set(false), "Back to the table" }
                     } else {
                         div { class: "placeholder-title", "This table is empty" }
                         div { class: "placeholder-sub",
@@ -523,13 +562,28 @@ mod tests {
     #[test]
     fn nothing_narrowed_shows_every_line_in_order_of_entry() {
         let c = cockpit();
-        assert_eq!(visible(&c, Sheet::Actions, None, "", None), c.actions);
+        assert_eq!(
+            visible(&c, Sheet::Actions, false, None, "", None),
+            c.actions
+        );
+    }
+
+    #[test]
+    fn archived_lines_have_a_view_of_their_own() {
+        let mut c = cockpit();
+        let tom = c.contact_named("Tom Leroy").unwrap().id;
+        c.set_archived(Sheet::Contacts, tom, true);
+        let in_use = visible(&c, Sheet::Contacts, false, None, "", None);
+        assert_eq!(in_use.len(), 4);
+        assert!(in_use.iter().all(|r| r.id != tom));
+        let put_away = visible(&c, Sheet::Contacts, true, None, "tom", None);
+        assert_eq!(titles(Sheet::Contacts, &put_away), vec!["Tom Leroy"]);
     }
 
     #[test]
     fn the_filter_keeps_one_entry_of_the_drop_down() {
         let c = cockpit();
-        let rows = visible(&c, Sheet::Goals, Some("Done"), "", None);
+        let rows = visible(&c, Sheet::Goals, false, Some("Done"), "", None);
         assert_eq!(
             titles(Sheet::Goals, &rows),
             vec!["Prepare 5 interview questions"]
@@ -539,21 +593,21 @@ mod tests {
     #[test]
     fn the_search_reads_every_column_whatever_the_case() {
         let c = cockpit();
-        let rows = visible(&c, Sheet::Signals, None, "  LINKEDIN ", None);
+        let rows = visible(&c, Sheet::Signals, false, None, "  LINKEDIN ", None);
         assert_eq!(rows.len(), 2);
-        let rows = visible(&c, Sheet::Signals, Some("High"), "linkedin", None);
+        let rows = visible(&c, Sheet::Signals, false, Some("High"), "linkedin", None);
         assert!(rows.is_empty());
     }
 
     #[test]
     fn an_action_is_found_and_sorted_by_its_contact_name() {
         let c = cockpit();
-        let rows = visible(&c, Sheet::Actions, None, "sophie", None);
+        let rows = visible(&c, Sheet::Actions, false, None, "sophie", None);
         assert_eq!(
             titles(Sheet::Actions, &rows),
             vec!["Pre-sale offer sent to Sophie"]
         );
-        let rows = visible(&c, Sheet::Actions, None, "léa martin", None);
+        let rows = visible(&c, Sheet::Actions, false, None, "léa martin", None);
         assert_eq!(
             titles(Sheet::Actions, &rows),
             vec!["Interview with a freelance graphic designer"]
@@ -563,7 +617,7 @@ mod tests {
             .iter()
             .position(|col| col.key == "contact")
             .unwrap();
-        let rows = visible(&c, Sheet::Actions, None, "", Some((contact, false)));
+        let rows = visible(&c, Sheet::Actions, false, None, "", Some((contact, false)));
         assert_eq!(rows[0].get("action"), "Pre-sale offer sent to Sophie");
     }
 
@@ -575,7 +629,7 @@ mod tests {
             .iter()
             .position(|col| col.key == "follow_up")
             .unwrap();
-        let rows = visible(&c, Sheet::Contacts, None, "", Some((due, true)));
+        let rows = visible(&c, Sheet::Contacts, false, None, "", Some((due, true)));
         assert_eq!(
             titles(Sheet::Contacts, &rows),
             vec![
@@ -639,9 +693,23 @@ mod tests {
         let status = |rows: &[Row]| -> Vec<String> {
             rows.iter().map(|r| r.get("status").to_string()).collect()
         };
-        let up = visible(&c, Sheet::Goals, None, "", Some((status_column, true)));
+        let up = visible(
+            &c,
+            Sheet::Goals,
+            false,
+            None,
+            "",
+            Some((status_column, true)),
+        );
         assert_eq!(status(&up), vec!["To do", "In progress", "Done"]);
-        let down = visible(&c, Sheet::Goals, None, "", Some((status_column, false)));
+        let down = visible(
+            &c,
+            Sheet::Goals,
+            false,
+            None,
+            "",
+            Some((status_column, false)),
+        );
         assert_eq!(status(&down), vec!["Done", "In progress", "To do"]);
     }
 
@@ -652,7 +720,7 @@ mod tests {
             Sheet::Actions,
             &[("date", "2025-01-02"), ("action", "Before")],
         );
-        let rows = visible(&c, Sheet::Actions, None, "", Some((0, true)));
+        let rows = visible(&c, Sheet::Actions, false, None, "", Some((0, true)));
         assert_eq!(rows[0].id, id);
     }
 }
