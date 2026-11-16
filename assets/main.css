@@ -391,6 +391,11 @@ body {
     border-top: 1px solid var(--border2);
 }
 .detail-gap { flex: 1; }
+.detail-archived {
+    padding: 8px 10px; border-radius: 6px;
+    background: var(--bg2); border: 1px solid var(--border2);
+    font-size: 12px; color: var(--text2);
+}
 .detail-ask { flex: 1; font-size: 12px; color: var(--text2); }
 
 .field { display: flex; flex-direction: column; gap: 5px; }

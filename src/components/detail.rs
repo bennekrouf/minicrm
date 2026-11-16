@@ -23,6 +23,12 @@ pub fn Detail(sheet: Sheet, id: u64) -> Element {
         return rsx! {};
     };
     let title = row.get(sheet.title_key()).trim();
+    let archived = row.archived;
+    let named = if title.is_empty() {
+        "This line".to_string()
+    } else {
+        format!("\u{201c}{title}\u{201d}")
+    };
 
     rsx! {
         aside { class: "detail-col",
@@ -42,6 +48,11 @@ pub fn Detail(sheet: Sheet, id: u64) -> Element {
                 }
             }
             div { class: "detail-body",
+                if archived {
+                    div { class: "detail-archived",
+                        "Archived: out of the table, its counts and Follow-ups until you restore it."
+                    }
+                }
                 for column in sheet.columns() {
                     Field {
                         key: "{id}-{column.key}",
@@ -79,6 +90,25 @@ pub fn Detail(sheet: Sheet, id: u64) -> Element {
                             }
                         },
                         "Duplicate"
+                    }
+                    button {
+                        class: "btn",
+                        title: if archived {
+                            "Back into the table, its counts and Follow-ups"
+                        } else {
+                            "Out of the table, its counts and Follow-ups, without losing it"
+                        },
+                        onclick: move |_| {
+                            cockpit.write().set_archived(sheet, id, !archived);
+                            ui.selected.set(None);
+                            let note = if archived {
+                                format!("{named} is back in {}.", sheet.title())
+                            } else {
+                                format!("{named} archived. Find it under Archived, beside the filters.")
+                            };
+                            ui.notice.set(Some(note));
+                        },
+                        if archived { "Restore" } else { "Archive" }
                     }
                     span { class: "detail-gap" }
                     button {
@@ -299,14 +329,16 @@ fn ContactField(sheet: Sheet, id: u64, column: Column, value: String) -> Element
     let ui = use_context::<Ui>();
     let mut cockpit = use_context::<Signal<Cockpit>>();
     let key = column.key;
+    let linked = cockpit.read().contact(&value).map(|r| r.id);
+    // The contacts in use, and the one already named even if archived.
     let mut people: Vec<(u64, String)> = cockpit
         .read()
         .contacts
         .iter()
+        .filter(|r| !r.archived || Some(r.id) == linked)
         .map(|r| (r.id, r.get("name").trim().to_string()))
         .collect();
     people.sort_by_key(|(_, name)| name.to_lowercase());
-    let linked = cockpit.read().contact(&value).map(|r| r.id);
 
     rsx! {
         div { class: "field",

@@ -1,5 +1,19 @@
 # Changelog
 
+## [Unreleased]
+
+### Added
+
+- Archive a line instead of deleting it: a contact set to Not now, last
+  month's goals, a question cleared up. Archive and Restore sit next to
+  Duplicate in the line's editor. An archived line keeps everything, a
+  contact what you did with them too, but leaves the table, the counts in
+  the sidebar and the guide, and Follow-ups. Each table shows an Archived
+  chip beside its filters once something is in it.
+- Claude can now archive and restore lines too, several at once, and read a
+  long table page after page, newest first if you like. A list of
+  contacts no longer stops at the first 200.
+
 ## [0.1.5] - 2026-11-15
 
 ### Changed

@@ -42,6 +42,8 @@ pub struct Ui {
     /// The column lines are sorted by, and whether ascending. None is the
     /// order they were added in.
     pub sort: Signal<Option<(usize, bool)>>,
+    /// The table shows its archived lines instead of those in use.
+    pub archived: Signal<bool>,
     /// What the last import or export did, under the page's heading.
     pub notice: Signal<Option<String>>,
     /// The day follow-ups are counted against. Read again each time a page
@@ -59,6 +61,7 @@ impl Ui {
             search: Signal::new(String::new()),
             filter: Signal::new(None),
             sort: Signal::new(None),
+            archived: Signal::new(false),
             notice: Signal::new(None),
             today: Signal::new(today()),
         }
@@ -71,6 +74,7 @@ impl Ui {
         self.search.set(String::new());
         self.filter.set(None);
         self.sort.set(None);
+        self.archived.set(false);
         self.notice.set(None);
         self.today.set(today());
         self.view.set(view);

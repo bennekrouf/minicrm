@@ -18,6 +18,8 @@ struct At {
     empty: bool,
     /// Sophie's pre-sale offer names a LinkedIn post in the media library.
     library: bool,
+    /// Tom Leroy, set to Not now, is archived.
+    archive_tom: bool,
 }
 
 fn at(view: View) -> At {
@@ -27,6 +29,7 @@ fn at(view: View) -> At {
         filter: None,
         empty: false,
         library: false,
+        archive_tom: false,
     }
 }
 
@@ -77,6 +80,10 @@ fn Harness(at: At) -> Element {
             let id = presale(&cockpit);
             cockpit.set(Sheet::Actions, id, "media", "publishkit:offer".into());
         }
+        if at.archive_tom {
+            let tom = cockpit.contact_named("Tom Leroy").unwrap().id;
+            cockpit.set_archived(Sheet::Contacts, tom, true);
+        }
         Signal::new(cockpit)
     });
     use_context_provider(|| {
@@ -92,6 +99,7 @@ fn Harness(at: At) -> Element {
         search: Signal::new(String::new()),
         filter: Signal::new(at.filter),
         sort: Signal::new(None),
+        archived: Signal::new(false),
         notice: Signal::new(None),
         today: Signal::new(wednesday()),
     });
@@ -349,4 +357,38 @@ fn a_contact_reads_name_then_next_step_in_the_grid_and_on_its_card() {
         .unwrap();
     assert!(sophie < next, "{card}");
     assert!(card.contains(r#"<span class="pill pill-bad cell-date">10 Nov 2026</span>"#));
+}
+
+#[test]
+fn an_archived_contact_waits_under_its_own_chip() {
+    let contacts = View::Sheet(Sheet::Contacts);
+    let html = render(at(contacts));
+    assert!(!html.contains("chip-archive"), "nothing archived yet");
+
+    let html = render(At {
+        archive_tom: true,
+        ..at(contacts)
+    });
+    assert!(!html.contains("Tom Leroy"));
+    assert!(html.contains(r#"<span class="sidebar-count">4</span>"#));
+    assert!(
+        html.contains("Archived<span class=\"chip-count\">1</span>"),
+        "{html}"
+    );
+
+    // Its editor says so, and offers to bring it back.
+    let tom = examples().contact_named("Tom Leroy").unwrap().id;
+    let html = render(At {
+        archive_tom: true,
+        selected: Some(tom),
+        ..at(contacts)
+    });
+    assert!(html.contains("detail-archived"));
+    assert!(html.contains(">Restore</button>"));
+    let sophie = examples().contact_named("Sophie Durand").unwrap().id;
+    let html = render(At {
+        selected: Some(sophie),
+        ..at(contacts)
+    });
+    assert!(html.contains(">Archive</button>"));
 }
