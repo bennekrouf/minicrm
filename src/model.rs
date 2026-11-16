@@ -544,6 +544,11 @@ pub struct Row {
     /// and Follow-ups until it is restored.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub archived: bool,
+    /// A contact kept in the network: someone known, such as a LinkedIn
+    /// connection, who is out of Contacts, the counts and Follow-ups, and
+    /// shows only in a search until added to Contacts.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub network: bool,
 }
 
 impl Row {
@@ -664,18 +669,42 @@ impl Cockpit {
             id,
             cells,
             archived: false,
+            network: false,
         });
         id
     }
 
-    /// The lines of a table still in use, archived ones left out.
+    /// The lines of a table still in use, archived ones and the network
+    /// left out.
     pub fn active(&self, sheet: Sheet) -> impl Iterator<Item = &Row> {
-        self.rows(sheet).iter().filter(|r| !r.archived)
+        self.rows(sheet)
+            .iter()
+            .filter(|r| !r.archived && !r.network)
     }
 
     /// How many lines of a table are archived.
     pub fn archived(&self, sheet: Sheet) -> usize {
-        self.rows(sheet).iter().filter(|r| r.archived).count()
+        self.rows(sheet)
+            .iter()
+            .filter(|r| r.archived && !r.network)
+            .count()
+    }
+
+    /// How many contacts wait in the network.
+    pub fn network(&self) -> usize {
+        self.contacts.iter().filter(|r| r.network).count()
+    }
+
+    /// Puts a contact in the network, or adds them to Contacts when
+    /// `network` is false. False when there is no such contact.
+    pub fn set_network(&mut self, id: u64, network: bool) -> bool {
+        match self.contacts.iter_mut().find(|r| r.id == id) {
+            Some(row) => {
+                row.network = network;
+                true
+            }
+            None => false,
+        }
     }
 
     /// Archives a line, or brings it back when `archived` is false. False
@@ -699,6 +728,7 @@ impl Cockpit {
         copy.id = new_id;
         // A copy is made to be worked on: it goes in the table.
         copy.archived = false;
+        copy.network = false;
         rows.insert(at + 1, copy);
         Some(new_id)
     }
@@ -756,6 +786,16 @@ impl Cockpit {
             return;
         };
         let contact_id = contact.id;
+        // Something done with someone from the network makes them a contact.
+        if contact.network {
+            self.set_network(contact_id, false);
+        }
+        let Some(contact) = self.row(Sheet::Contacts, contact_id) else {
+            return;
+        };
+        let Some(row) = self.row(Sheet::Actions, action) else {
+            return;
+        };
         let date = row.get("date").to_string();
         let due = row.get("follow_up_on").to_string();
         let what = row.get("follow_up").trim().to_string();

@@ -37,7 +37,11 @@ follow-up and next step (with none, their follow-up stays as it was), so don't r
 the contact. Proposal sent, Client and Not now are only ever set by hand. follow_ups lists who \
 to get back to. A line done with, such as a contact set to Not now or last month's goals, is \
 archived with archive_line rather than deleted: it leaves the table, the counts and follow-ups, \
-and list_lines with archived: true finds it. list_lines gives a page at a time: carry on from \
+and list_lines with archived: true finds it. The network holds people known but not worked \
+with, such as LinkedIn connections imported with import_csv network: true: they stay out of \
+contacts, the counts and follow-ups, and are only searched, with list_lines network: true and \
+text. When the user starts working with one, set_network with network: false makes them a \
+contact, a Lead. list_lines gives a page at a time: carry on from \
 its next_offset. MiniCRM reads the media library PolishCast, TrackCut and PublishKit share: a post \
 that goes out is logged in actions on its own, type Post, its media cell naming it, so never log \
 it again; fill in its result and what was learned instead. An action's media cell names the video \
@@ -103,18 +107,30 @@ fn run(cockpit: &mut Cockpit, name: &str, args: &Value, today: NaiveDate) -> Res
             Ok(json!({ "deleted": id, "table": sheet.id(), "was": title }))
         }
         "archive_line" => archive_line(cockpit, args),
+        "set_network" => set_network(cockpit, args),
         "follow_ups" => follow_ups(cockpit, args, today),
         "set_follow_up" => set_follow_up(cockpit, args, today),
         "import_csv" => {
             let sheet = table(args)?;
             let path = text(args, "path")?;
             let bytes = std::fs::read(&path).map_err(|e| format!("Couldn't read {path}: {e}"))?;
-            let done = transfer::import(cockpit, sheet, &String::from_utf8_lossy(&bytes), today)?;
+            let network = args["network"].as_bool().unwrap_or(false);
+            if network && sheet != Sheet::Contacts {
+                return Err("network: true imports into contacts only".into());
+            }
+            let done = transfer::import(
+                cockpit,
+                sheet,
+                &String::from_utf8_lossy(&bytes),
+                today,
+                network,
+            )?;
             Ok(json!({
                 "table": sheet.id(),
                 "added": done.added,
                 "skipped_existing_contacts": done.skipped,
-                "lines_now": cockpit.rows(sheet).len(),
+                "lines_now": cockpit.active(sheet).count(),
+                "network": cockpit.network(),
             }))
         }
         "export_csv" => {
@@ -171,6 +187,7 @@ fn overview(cockpit: &Cockpit, library: &[Item], today: NaiveDate) -> Value {
                 "answers": sheet.question(),
                 "lines": cockpit.active(*sheet).count(),
                 "archived": cockpit.archived(*sheet),
+                "network": if *sheet == Sheet::Contacts { json!(cockpit.network()) } else { Value::Null },
                 "filter_column": sheet.filter_column().key,
                 "columns": columns,
             })
@@ -238,11 +255,19 @@ fn list_lines(cockpit: &Cockpit, args: &Value) -> Result<Value, String> {
         .map_or(LIST_DEFAULT, |n| (n as usize).clamp(1, LIST_MAX));
     let offset = args["offset"].as_u64().unwrap_or(0) as usize;
     let archived = args["archived"].as_bool().unwrap_or(false);
+    let network = args["network"].as_bool().unwrap_or(false);
+    if network && (sheet != Sheet::Contacts || needle.is_none()) {
+        return Err(
+            "network: true searches contacts only, and needs text: the network is \
+                    only searched"
+                .into(),
+        );
+    }
 
     let mut kept: Vec<&Row> = cockpit
         .rows(sheet)
         .iter()
-        .filter(|r| r.archived == archived)
+        .filter(|r| r.network == network && (network || r.archived == archived))
         .filter(|r| {
             filter
                 .as_deref()
@@ -271,6 +296,7 @@ fn list_lines(cockpit: &Cockpit, args: &Value) -> Result<Value, String> {
     Ok(json!({
         "table": sheet.id(),
         "archived": archived,
+        "network": network,
         "matching": kept.len(),
         "offset": offset,
         "shown": lines.len(),
@@ -317,6 +343,45 @@ fn archive_line(cockpit: &mut Cockpit, args: &Value) -> Result<Value, String> {
         "lines": lines,
         "lines_in_use": cockpit.active(sheet).count(),
         "lines_archived": cockpit.archived(sheet),
+    }))
+}
+
+/// Moves contacts from the network into Contacts, or back with
+/// `network: true`: one by `id` or `name`, or several by `ids`.
+fn set_network(cockpit: &mut Cockpit, args: &Value) -> Result<Value, String> {
+    let sheet = Sheet::Contacts;
+    let network = args["network"].as_bool().unwrap_or(false);
+    let ids: Vec<u64> = match args["ids"].as_array() {
+        Some(list) => list
+            .iter()
+            .map(|v| {
+                let id = v
+                    .as_u64()
+                    .ok_or(format!("ids are contact ids: {v} is not one"))?;
+                cockpit
+                    .row(sheet, id)
+                    .map(|r| r.id)
+                    .ok_or_else(|| format!("contacts has no line {id}"))
+            })
+            .collect::<Result<_, _>>()?,
+        None => vec![line_id(cockpit, sheet, args)?],
+    };
+    let lines: Vec<Value> = ids
+        .iter()
+        .map(|&id| {
+            cockpit.set_network(id, network);
+            let name = cockpit
+                .row(sheet, id)
+                .map(|r| r.get("name").to_string())
+                .unwrap_or_default();
+            json!({ "id": id, "name": name })
+        })
+        .collect();
+    Ok(json!({
+        "done": if network { "moved to the network" } else { "added to contacts" },
+        "lines": lines,
+        "contacts": cockpit.active(sheet).count(),
+        "network": cockpit.network(),
     }))
 }
 
@@ -404,6 +469,9 @@ fn row_json(cockpit: &Cockpit, sheet: Sheet, row: &Row) -> Value {
     out.insert("id".into(), json!(row.id));
     if row.archived {
         out.insert("archived".into(), json!(true));
+    }
+    if row.network {
+        out.insert("network".into(), json!(true));
     }
     for column in sheet.columns() {
         let value = cockpit.display(column, row);
@@ -654,6 +722,7 @@ fn tools() -> Value {
                 "offset": { "type": "integer", "minimum": 0, "description": "Lines to skip: the previous page's next_offset. Default 0." },
                 "newest_first": { "type": "boolean", "description": "The latest added first." },
                 "archived": { "type": "boolean", "description": "The archived lines instead of those in use." },
+                "network": { "type": "boolean", "description": "Contacts only, with text: search the network (people known, such as LinkedIn connections, not yet contacts) instead." },
             }},
             "annotations": read_only,
         },
@@ -698,6 +767,16 @@ fn tools() -> Value {
             "annotations": { "idempotentHint": true },
         },
         {
+            "name": "set_network",
+            "description": "Makes people from the network contacts, as Leads, in the table, its counts and follow-ups: one by id or name, or several by ids. network: true puts contacts back in the network.",
+            "inputSchema": { "type": "object", "properties": {
+                "id": id, "name": name,
+                "ids": { "type": "array", "items": { "type": "integer" }, "description": "Several contacts at once, by id, instead of id or name." },
+                "network": { "type": "boolean", "description": "Into the network instead of out of it." },
+            }},
+            "annotations": { "idempotentHint": true },
+        },
+        {
             "name": "follow_ups",
             "description": "Contacts and actions whose follow-up date has come round, the oldest first: by default everything due by Sunday, late ones included.",
             "inputSchema": { "type": "object", "properties": {
@@ -719,10 +798,11 @@ fn tools() -> Value {
         },
         {
             "name": "import_csv",
-            "description": "Adds the lines of a CSV file to a table, matching its headings to the columns; LinkedIn's Connections.csv works as it is. Contacts already there by name are left out.",
+            "description": "Adds the lines of a CSV file to a table, matching its headings to the columns; LinkedIn's Connections.csv works as it is. Contacts already there by name are left out. With network: true, contacts go to the network: searchable, but out of contacts, the counts and follow-ups, as fits a whole LinkedIn export.",
             "inputSchema": { "type": "object", "required": ["table", "path"], "properties": {
                 "table": table,
                 "path": { "type": "string", "description": "Absolute path of the CSV file." },
+                "network": { "type": "boolean", "description": "Contacts only: into the network rather than contacts." },
             }},
         },
         {
@@ -980,6 +1060,52 @@ mod tests {
         )
         .unwrap();
         assert_eq!(newest["lines"][0]["name"], "Person 249");
+    }
+
+    #[test]
+    fn the_network_is_only_searched_until_someone_is_added() {
+        let dir = std::env::temp_dir().join(format!("minicrm-network-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("Connections.csv");
+        std::fs::write(
+            &path,
+            "First Name,Last Name,Company,Position\nAda,Lovelace,Analytical Engines,Founder\n",
+        )
+        .unwrap();
+        let mut c = examples();
+        let done = go(
+            &mut c,
+            "import_csv",
+            json!({ "table": "contacts", "path": path.to_str().unwrap(), "network": true }),
+        )
+        .unwrap();
+        assert_eq!(done["added"], 1);
+        assert_eq!(done["network"], 1);
+        assert_eq!(done["lines_now"], 5);
+
+        let list = go(&mut c, "list_lines", json!({ "table": "contacts" })).unwrap();
+        assert_eq!(list["matching"], 5);
+        assert!(go(
+            &mut c,
+            "list_lines",
+            json!({ "table": "contacts", "network": true })
+        )
+        .is_err());
+        let found = go(
+            &mut c,
+            "list_lines",
+            json!({ "table": "contacts", "network": true, "text": "engines" }),
+        )
+        .unwrap();
+        assert_eq!(found["lines"][0]["name"], "Ada Lovelace");
+        assert_eq!(found["lines"][0]["network"], true);
+        let o = go(&mut c, "overview", json!({})).unwrap();
+        assert_eq!(o["tables"][4]["network"], 1);
+
+        let added = go(&mut c, "set_network", json!({ "name": "Ada Lovelace" })).unwrap();
+        assert_eq!(added["contacts"], 6);
+        assert_eq!(added["network"], 0);
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 
     #[test]

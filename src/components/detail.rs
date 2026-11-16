@@ -24,6 +24,7 @@ pub fn Detail(sheet: Sheet, id: u64) -> Element {
     };
     let title = row.get(sheet.title_key()).trim();
     let archived = row.archived;
+    let network = row.network;
     let named = if title.is_empty() {
         "This line".to_string()
     } else {
@@ -48,6 +49,22 @@ pub fn Detail(sheet: Sheet, id: u64) -> Element {
                 }
             }
             div { class: "detail-body",
+                if network {
+                    div { class: "detail-archived detail-network",
+                        span { "In your network: found by searching, out of Contacts, the counts and Follow-ups." }
+                        button {
+                            class: "btn btn-primary btn-small",
+                            onclick: {
+                                let named = named.clone();
+                                move |_| {
+                                cockpit.write().set_network(id, false);
+                                ui.notice.set(Some(format!("{named} added to Contacts.")));
+                                }
+                            },
+                            "Add to Contacts"
+                        }
+                    }
+                }
                 if archived {
                     div { class: "detail-archived",
                         "Archived: out of the table, its counts and Follow-ups until you restore it."
@@ -335,7 +352,7 @@ fn ContactField(sheet: Sheet, id: u64, column: Column, value: String) -> Element
         .read()
         .contacts
         .iter()
-        .filter(|r| !r.archived || Some(r.id) == linked)
+        .filter(|r| (!r.archived && !r.network) || Some(r.id) == linked)
         .map(|r| (r.id, r.get("name").trim().to_string()))
         .collect();
     people.sort_by_key(|(_, name)| name.to_lowercase());

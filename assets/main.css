@@ -635,3 +635,7 @@ body {
     .col-head-main { flex-basis: 100%; }
     .search { flex: 1; width: auto; }
 }
+
+/* A contact from the network, found by a search: set apart from Contacts. */
+.row-network td { color: var(--text2); font-style: italic; }
+.detail-network { display: flex; gap: 10px; align-items: center; justify-content: space-between; }
