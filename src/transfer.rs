@@ -42,12 +42,15 @@ pub fn export(cockpit: &Cockpit, sheet: Sheet) -> String {
 }
 
 /// Adds the lines of a CSV file to a table. Contacts whose name the cockpit
-/// already has are left out, so importing the same file twice adds nothing.
+/// already has (in Contacts or the network) are left out, so importing the
+/// same file twice adds nothing. With `network`, contacts go to the network
+/// rather than Contacts: see [`crate::model::Row::network`].
 pub fn import(
     cockpit: &mut Cockpit,
     sheet: Sheet,
     text: &str,
     today: NaiveDate,
+    network: bool,
 ) -> Result<Imported, String> {
     let text = text.trim_start_matches(BOM);
     // Comma, then the semicolon Excel writes in some countries, then tab:
@@ -104,6 +107,9 @@ pub fn import(
         }
 
         let id = cockpit.add(sheet, today);
+        if network && sheet == Sheet::Contacts {
+            cockpit.set_network(id, true);
+        }
         // `add` gave the lines their defaults; the file's cells take over
         // where they say something.
         for (key, value) in cells {
@@ -351,7 +357,7 @@ mod tests {
                 },
                 ..Cockpit::default()
             };
-            let done = import(&mut cockpit, sheet, &csv, day()).unwrap();
+            let done = import(&mut cockpit, sheet, &csv, day(), false).unwrap();
             assert_eq!(done.added, examples.rows(sheet).len(), "{sheet:?}");
             let cells =
                 |c: &Cockpit| -> Vec<_> { c.rows(sheet).iter().map(|r| r.cells.clone()).collect() };
@@ -368,7 +374,7 @@ mod tests {
     fn a_contact_already_there_is_not_added_twice() {
         let mut cockpit = seed::examples(day());
         let csv = export(&cockpit, Sheet::Contacts);
-        let done = import(&mut cockpit, Sheet::Contacts, &csv, day()).unwrap();
+        let done = import(&mut cockpit, Sheet::Contacts, &csv, day(), false).unwrap();
         assert_eq!(
             done,
             Imported {
@@ -387,7 +393,7 @@ mod tests {
             Ada,Lovelace,https://www.linkedin.com/in/ada,ada@example.com,Analytical Engines,Founder,14 Nov 2026\n\
             Alan,Turing,https://www.linkedin.com/in/alan,,,,03 Oct 2026\n";
         let mut cockpit = Cockpit::default();
-        let done = import(&mut cockpit, Sheet::Contacts, csv, day()).unwrap();
+        let done = import(&mut cockpit, Sheet::Contacts, csv, day(), false).unwrap();
         assert_eq!(done.added, 2);
         let ada = &cockpit.contacts[0];
         assert_eq!(ada.get("name"), "Ada Lovelace");
@@ -399,13 +405,40 @@ mod tests {
     }
 
     #[test]
+    fn a_linkedin_export_can_go_to_the_network() {
+        let csv = "First Name,Last Name,Company,Position\n\
+                   Ada,Lovelace,Analytical Engines,Founder\n\
+                   Alan,Turing,Bletchley,Analyst\n";
+        let mut cockpit = Cockpit::default();
+        cockpit.add_with(Sheet::Contacts, &[("name", "Alan Turing")]);
+        let done = import(&mut cockpit, Sheet::Contacts, csv, day(), true).unwrap();
+        // Alan is already a contact: not added again, even to the network.
+        assert_eq!(
+            done,
+            Imported {
+                added: 1,
+                skipped: 1
+            }
+        );
+        assert_eq!(cockpit.network(), 1);
+        assert_eq!(cockpit.active(Sheet::Contacts).count(), 1);
+        assert!(cockpit
+            .contacts
+            .iter()
+            .any(|r| r.network && r.get("name") == "Ada Lovelace"));
+        // Importing it again adds nothing.
+        let again = import(&mut cockpit, Sheet::Contacts, csv, day(), true).unwrap();
+        assert_eq!(again.added, 0);
+    }
+
+    #[test]
     fn a_semicolon_file_with_other_names_and_formats_is_read() {
         // As Excel writes CSV where the comma is the decimal mark.
         let csv = "Name;Status;E-mail;Follow-up date;Hobby\n\
                    Grace Hopper;client;grace@example.com;20/11/2026;Sailing\n\
                    Edsger;Somewhere else;;;\n";
         let mut cockpit = Cockpit::default();
-        import(&mut cockpit, Sheet::Contacts, csv, day()).unwrap();
+        import(&mut cockpit, Sheet::Contacts, csv, day(), false).unwrap();
         let grace = &cockpit.contacts[0];
         assert_eq!(grace.get("stage"), "Client");
         assert_eq!(grace.get("email"), "grace@example.com");
@@ -421,7 +454,7 @@ mod tests {
         let csv = "Date,Action taken,Contact\n\
                    2026-11-10,Call,léa\n\
                    2026-11-11,Coffee,Someone new\n";
-        import(&mut cockpit, Sheet::Actions, csv, day()).unwrap();
+        import(&mut cockpit, Sheet::Actions, csv, day(), false).unwrap();
         assert_eq!(cockpit.actions[0].get("contact"), lea.to_string());
         assert_eq!(cockpit.actions[1].get("contact"), "");
         assert_eq!(cockpit.actions[1].get("target"), "Someone new");
@@ -432,7 +465,7 @@ mod tests {
     #[test]
     fn a_file_that_matches_nothing_says_so() {
         let mut cockpit = Cockpit::default();
-        let err = import(&mut cockpit, Sheet::Contacts, "a,b\n1,2\n", day()).unwrap_err();
+        let err = import(&mut cockpit, Sheet::Contacts, "a,b\n1,2\n", day(), false).unwrap_err();
         assert!(err.contains("Name, Next step, Next follow-up"), "{err}");
         assert!(cockpit.contacts.is_empty());
     }
@@ -445,6 +478,7 @@ mod tests {
             Sheet::Questions,
             "Question,Status\nWhy?,Clarified\n,\n\n",
             day(),
+            false,
         )
         .unwrap();
         assert_eq!(done.added, 1);

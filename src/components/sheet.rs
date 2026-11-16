@@ -55,7 +55,8 @@ fn mentions(cockpit: &Cockpit, sheet: Sheet, row: &Row, needle: &str) -> bool {
 }
 
 /// The lines to show: those in use, or the archived ones when `archived`,
-/// that the filter and the search keep, in the sort's order.
+/// that the filter and the search keep, in the sort's order. A search of
+/// the contacts in use also finds the network, after them.
 fn visible(
     cockpit: &Cockpit,
     sheet: Sheet,
@@ -69,7 +70,7 @@ fn visible(
     let mut kept: Vec<Row> = cockpit
         .rows(sheet)
         .iter()
-        .filter(|r| r.archived == archived)
+        .filter(|r| !r.network && r.archived == archived)
         .filter(|r| filter.is_none_or(|f| r.get(filter_key) == f))
         .filter(|r| needle.is_empty() || mentions(cockpit, sheet, r, &needle))
         .cloned()
@@ -86,6 +87,15 @@ fn visible(
                 }
             });
         }
+    }
+    if sheet == Sheet::Contacts && !archived {
+        kept.extend(
+            cockpit
+                .contacts
+                .iter()
+                .filter(|r| r.network && !needle.is_empty() && mentions(cockpit, sheet, r, &needle))
+                .cloned(),
+        );
     }
     kept
 }
@@ -144,7 +154,12 @@ pub fn SheetView(sheet: Sheet) -> Element {
     let today = (ui.today)();
     let archived = (ui.archived)();
     let put_away = cockpit.read().archived(sheet);
-    let in_use = cockpit.read().rows(sheet).len() - put_away;
+    let in_use = cockpit.read().active(sheet).count();
+    let network = if sheet == Sheet::Contacts {
+        cockpit.read().network()
+    } else {
+        0
+    };
     // The lines of the view open: in use, or archived.
     let total = if archived { put_away } else { in_use };
     let at = |label: &str| {
@@ -152,7 +167,7 @@ pub fn SheetView(sheet: Sheet) -> Element {
             .read()
             .rows(sheet)
             .iter()
-            .filter(|r| r.archived == archived && r.get(filter_column.key) == label)
+            .filter(|r| !r.network && r.archived == archived && r.get(filter_column.key) == label)
             .count()
     };
     let rows = visible(&cockpit.read(), sheet, archived, filter, &search, sort);
@@ -191,7 +206,7 @@ pub fn SheetView(sheet: Sheet) -> Element {
                 input {
                     class: "search",
                     r#type: "search",
-                    placeholder: "Search\u{2026}",
+                    placeholder: if network > 0 { "Search, network included\u{2026}" } else { "Search\u{2026}" },
                     value: "{search}",
                     oninput: move |e| ui.search.set(e.value()),
                 }
@@ -268,13 +283,47 @@ pub fn SheetView(sheet: Sheet) -> Element {
                                     };
                                     let bytes = file.read().await;
                                     let text = String::from_utf8_lossy(&bytes);
-                                    let done = transfer::import(&mut cockpit.write(), sheet, &text, today);
+                                    let done = transfer::import(&mut cockpit.write(), sheet, &text, today, false);
                                     ui.filter.set(None);
                                     ui.search.set(String::new());
                                     ui.notice.set(Some(imported(sheet, &file.file_name(), done)));
                                 });
                             },
                             "Import CSV"
+                        }
+                        if sheet == Sheet::Contacts {
+                            button {
+                                class: "btn btn-small",
+                                title: "Add a whole LinkedIn export to your network: found by searching, out of Contacts, the counts and Follow-ups until you add someone",
+                                onclick: move |_| {
+                                    spawn(async move {
+                                        let Some(file) = rfd::AsyncFileDialog::new()
+                                            .set_title("Import into the network")
+                                            .add_filter("CSV", &["csv", "txt", "tsv"])
+                                            .pick_file()
+                                            .await
+                                        else {
+                                            return;
+                                        };
+                                        let bytes = file.read().await;
+                                        let text = String::from_utf8_lossy(&bytes);
+                                        let done = transfer::import(&mut cockpit.write(), sheet, &text, today, true);
+                                        ui.filter.set(None);
+                                        ui.search.set(String::new());
+                                        let note = match done {
+                                            Ok(d) => format!(
+                                                "{} people added to your network from {}{}. Search to find them.",
+                                                d.added,
+                                                file.file_name(),
+                                                if d.skipped > 0 { format!(", {} already there", d.skipped) } else { String::new() },
+                                            ),
+                                            Err(e) => e,
+                                        };
+                                        ui.notice.set(Some(note));
+                                    });
+                                },
+                                "Import to network"
+                            }
                         }
                         button {
                             class: "btn btn-small",
@@ -372,7 +421,13 @@ pub fn SheetView(sheet: Sheet) -> Element {
                                 rsx! {
                                     tr {
                                         key: "{id}",
-                                        class: if open == Some(id) { "row row-on" } else { "row" },
+                                        class: match (open == Some(id), row.network) {
+                                            (true, true) => "row row-on row-network",
+                                            (true, false) => "row row-on",
+                                            (false, true) => "row row-network",
+                                            (false, false) => "row",
+                                        },
+                                        title: if row.network { "In your network: open to add to Contacts" } else { "" },
                                         onclick: move |_| ui.selected.set(Some(id)),
                                         for column in columns {
                                             td { key: "{column.key}", class: column_class(sheet, column),
@@ -566,6 +621,23 @@ mod tests {
             visible(&c, Sheet::Actions, false, None, "", None),
             c.actions
         );
+    }
+
+    #[test]
+    fn the_network_shows_only_in_a_search_of_contacts() {
+        let mut c = Cockpit::default();
+        c.add_with(Sheet::Contacts, &[("name", "Léa Martin")]);
+        let ada = c.add_with(Sheet::Contacts, &[("name", "Ada Lovelace")]);
+        c.set_network(ada, true);
+        let names = |search: &str| -> Vec<String> {
+            visible(&c, Sheet::Contacts, false, None, search, None)
+                .iter()
+                .map(|r| r.get("name").to_string())
+                .collect()
+        };
+        assert_eq!(names(""), ["Léa Martin"]);
+        assert_eq!(names("ada"), ["Ada Lovelace"]);
+        assert_eq!(names("a"), ["Léa Martin", "Ada Lovelace"]);
     }
 
     #[test]

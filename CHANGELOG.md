@@ -1,5 +1,31 @@
 # Changelog
 
+## [Unreleased]
+
+### Added
+
+- MiniCRM is now also published as an .msi for IT departments, to deploy with
+  Intune, Group Policy or SCCM: `msiexec /i minicrm.msi ALLUSERS=1 /qn` installs
+  it for every user. Double-clicked, it installs for you alone with no admin
+  prompt, and it replaces an install made with the setup .exe.
+- IT departments can manage MiniCRM on Windows with Group Policy or Intune:
+  turn off the update check, self-update or usage statistics, and set
+  the licence number for every user, under
+  `HKLM\SOFTWARE\Policies\Mayorana\MiniCRM`.
+- Your network: bring in a whole LinkedIn export with Import to network,
+  beside Import CSV in Contacts, without burying the people you actually
+  work with. Those connections stay out of Contacts, the counts and
+  Follow-ups, and only show up when you search. Open one and click Add to
+  Contacts, or log an action with them, and they become a Lead.
+
+### Fixed
+
+- On Windows, MiniCRM no longer opens a black command window next to its
+  own, and closing that window no longer quits the app.
+- Installing over an existing MiniCRM on Windows no longer gets stuck on
+  "Setup was unable to automatically close all applications". Setup now
+  closes MiniCRM and its helper processes itself before replacing it.
+
 ## [0.1.6] - 2026-11-16
 
 ### Added

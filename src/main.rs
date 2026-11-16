@@ -8,6 +8,8 @@
 //! video or post it was about, from the media library MiniCRM shares with
 //! PolishCast, TrackCut and PublishKit. A table goes in and out as a CSV
 //! file.
+// Release builds on Windows are GUI programs: no cmd window opens beside the app.
+#![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem = "windows")]
 
 mod components;
 mod kit;
