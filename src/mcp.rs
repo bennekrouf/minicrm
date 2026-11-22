@@ -798,7 +798,7 @@ fn tools() -> Value {
         },
         {
             "name": "import_csv",
-            "description": "Adds the lines of a CSV file to a table, matching its headings to the columns; LinkedIn's Connections.csv works as it is. Contacts already there by name are left out. With network: true, contacts go to the network: searchable, but out of contacts, the counts and follow-ups, as fits a whole LinkedIn export.",
+            "description": "Adds the lines of a CSV file to a table, matching its headings to the columns; LinkedIn's Connections.csv works as it is. Contacts already there by name or email are left out. With network: true, contacts go to the network: searchable, but out of contacts, the counts and follow-ups, as fits a whole LinkedIn export.",
             "inputSchema": { "type": "object", "required": ["table", "path"], "properties": {
                 "table": table,
                 "path": { "type": "string", "description": "Absolute path of the CSV file." },

@@ -1,5 +1,14 @@
 # Changelog
 
+## [Unreleased]
+
+### Changed
+
+- Importing contacts now also leaves out people whose email you already
+  have, not only those with the same name. Someone who changed their name,
+  or who appears as "Bob" in one file and "Robert Smith" in another, is no
+  longer added twice.
+
 ## [0.1.8] - 2026-11-17
 
 ### Changed

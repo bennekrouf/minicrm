@@ -22,7 +22,7 @@ const HEADER_SEARCH: usize = 20;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Imported {
     pub added: usize,
-    /// Contacts already in the cockpit under the same name.
+    /// Contacts already in the cockpit under the same name or email.
     pub skipped: usize,
 }
 
@@ -41,10 +41,10 @@ pub fn export(cockpit: &Cockpit, sheet: Sheet) -> String {
     format!("{BOM}{}", String::from_utf8_lossy(&bytes))
 }
 
-/// Adds the lines of a CSV file to a table. Contacts whose name the cockpit
-/// already has (in Contacts or the network) are left out, so importing the
-/// same file twice adds nothing. With `network`, contacts go to the network
-/// rather than Contacts: see [`crate::model::Row::network`].
+/// Adds the lines of a CSV file to a table. Contacts whose name or email the
+/// cockpit already has (in Contacts or the network) are left out, so
+/// importing the same file twice adds nothing. With `network`, contacts go to
+/// the network rather than Contacts: see [`crate::model::Row::network`].
 pub fn import(
     cockpit: &mut Cockpit,
     sheet: Sheet,
@@ -85,11 +85,15 @@ pub fn import(
             continue;
         }
         if sheet == Sheet::Contacts {
-            let name = cells
-                .iter()
-                .find(|(k, _)| *k == "name")
-                .map_or("", |(_, v)| v.as_str());
-            if cockpit.contact_named(name).is_some() {
+            let cell = |key: &str| {
+                cells
+                    .iter()
+                    .find(|(k, _)| *k == key)
+                    .map_or("", |(_, v)| v.as_str())
+            };
+            if cockpit.contact_named(cell("name")).is_some()
+                || cockpit.contact_with_email(cell("email")).is_some()
+            {
                 done.skipped += 1;
                 continue;
             }
@@ -429,6 +433,31 @@ mod tests {
         // Importing it again adds nothing.
         let again = import(&mut cockpit, Sheet::Contacts, csv, day(), true).unwrap();
         assert_eq!(again.added, 0);
+    }
+
+    #[test]
+    fn a_contact_already_there_by_email_is_not_added_twice() {
+        let mut cockpit = Cockpit::default();
+        cockpit.add_with(
+            Sheet::Contacts,
+            &[("name", "Ada Lovelace"), ("email", "ada@example.com")],
+        );
+        // Ada under another name, and someone new in the same file twice.
+        let csv = "Name,Email\n\
+                   Ada King, ADA@Example.com \n\
+                   Grace Hopper,grace@example.com\n\
+                   G. Hopper,grace@example.com\n\
+                   Alan Turing,\n";
+        let done = import(&mut cockpit, Sheet::Contacts, csv, day(), false).unwrap();
+        assert_eq!(
+            done,
+            Imported {
+                added: 2,
+                skipped: 2
+            }
+        );
+        let names: Vec<&str> = cockpit.contacts.iter().map(|r| r.get("name")).collect();
+        assert_eq!(names, ["Ada Lovelace", "Grace Hopper", "Alan Turing"]);
     }
 
     #[test]
