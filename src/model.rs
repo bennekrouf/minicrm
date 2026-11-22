@@ -833,6 +833,17 @@ impl Cockpit {
             .find(|r| r.get("name").trim().to_lowercase() == name)
     }
 
+    /// The contact whose email is `email`, whatever the case.
+    pub fn contact_with_email(&self, email: &str) -> Option<&Row> {
+        let email = email.trim().to_lowercase();
+        if email.is_empty() {
+            return None;
+        }
+        self.contacts
+            .iter()
+            .find(|r| r.get("email").trim().to_lowercase() == email)
+    }
+
     /// A cell as it reads: a contact by their name, a video or post by its
     /// title, anything else as kept.
     pub fn display(&self, column: &Column, row: &Row) -> String {
