@@ -132,6 +132,7 @@ const PRIORITY: &[Choice] = &[
 
 const ACTION_TYPE: &[Choice] = &[
     choice("Message sent", Tone::Neutral),
+    choice("Reply received", Tone::Neutral),
     choice("Call", Tone::Neutral),
     choice("Interview", Tone::Neutral),
     choice("Test", Tone::Neutral),
@@ -139,6 +140,24 @@ const ACTION_TYPE: &[Choice] = &[
     choice("Research", Tone::Neutral),
     choice("Other", Tone::Neutral),
 ];
+
+/// Whether an action was done or is only planned. A line without one, from
+/// before actions had it, reads as done.
+pub const ACTION_STATUS: &[Choice] = &[
+    choice("Done", Tone::Neutral),
+    choice("Planned", Tone::Soft),
+    choice("Cancelled", Tone::Bad),
+];
+
+/// An action that was done: its own status, or none from before there was
+/// one. Only those move a contact along or set their follow-up.
+pub fn is_done(row: &Row) -> bool {
+    matches!(row.get("status"), "" | "Done")
+}
+
+pub fn is_planned(row: &Row) -> bool {
+    row.get("status") == "Planned"
+}
 
 const IMPORTANCE: &[Choice] = &[
     choice("Low", Tone::Neutral),
@@ -185,9 +204,17 @@ const ACTIONS: &[Column] = &[
         Width::Medium,
         true,
     ),
+    col(
+        "status",
+        "Done or planned",
+        Kind::Choice(ACTION_STATUS),
+        Width::Narrow,
+        false,
+    ),
     col("contact", "Contact", Kind::Contact, Width::Medium, true),
     col("media", "Video or post", Kind::Media, Width::Wide, false),
     col("target", "Person / target", Kind::Text, Width::Wide, false),
+    col("notes", "Message or notes", Kind::Long, Width::Wide, false),
     col("result", "Result", Kind::Long, Width::Wide, false),
     col("learned", "What I learned", Kind::Long, Width::Wide, false),
     col("follow_up", "Follow-up", Kind::Long, Width::Wide, false),
@@ -237,10 +264,34 @@ const ACTION_KEYS_FOR_CONTACT: &[&str] = &[
     "action",
     "contact",
     "type",
+    "status",
     "date",
     "follow_up",
     "follow_up_on",
 ];
+
+/// The cell of a planned action that ties it to the other steps of the
+/// sequence it was planned in: the first step's id. Not a column.
+pub const SEQUENCE: &str = "sequence";
+
+/// A stage that says the person answered or decided: past it, the steps
+/// still planned in a sequence for them have no reason to go out.
+fn ends_sequences(stage: &str) -> bool {
+    let rank = |label: &str| STAGES.iter().position(|s| s.label == label);
+    rank(stage) > rank("Contacted")
+}
+
+/// One step of a sequence to plan for a contact.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Step {
+    pub date: NaiveDate,
+    /// What will be done: the message's subject.
+    pub action: String,
+    /// The message itself, or notes for it.
+    pub notes: String,
+    /// One of the action types; Message sent when empty.
+    pub kind: String,
+}
 
 /// The stage a contact moves to after an action of this type, if it moves
 /// them forward. Only the early stages move on their own: Lead, Contacted
@@ -249,7 +300,7 @@ const ACTION_KEYS_FOR_CONTACT: &[&str] = &[
 fn forward_stage(stage: &str, action_type: &str) -> Option<&'static str> {
     let to = match action_type {
         "Message sent" => "Contacted",
-        "Call" | "Interview" => "In conversation",
+        "Reply received" | "Call" | "Interview" => "In conversation",
         _ => return None,
     };
     let rank = |label: &str| STAGES.iter().position(|s| s.label == label);
@@ -527,6 +578,8 @@ pub struct FollowUp {
     pub what: String,
     /// For an action, the contact it was with.
     pub contact: String,
+    /// An action still to do, listed on its own date.
+    pub planned: bool,
 }
 
 /// The week a day falls in, as the Week column writes it: `W46`.
@@ -756,6 +809,108 @@ impl Cockpit {
         if sheet == Sheet::Actions && ACTION_KEYS_FOR_CONTACT.contains(&key) {
             self.update_contact(id);
         }
+        if sheet == Sheet::Contacts && key == "stage" {
+            let stage = self.row(sheet, id).map(|r| r.get("stage").to_string());
+            if stage.is_some_and(|s| ends_sequences(&s)) {
+                self.cancel_sequences(id);
+            }
+        }
+    }
+
+    /// Marks an action done now: a planned one takes today's date if it was
+    /// planned for later, and moves its contact along as any action does.
+    pub fn complete(&mut self, id: u64, today: NaiveDate) {
+        let Some(row) = self.row(Sheet::Actions, id) else {
+            return;
+        };
+        if row.get("date") > iso(today).as_str() {
+            self.set(Sheet::Actions, id, "date", iso(today));
+        }
+        self.set(Sheet::Actions, id, "status", "Done".into());
+    }
+
+    /// Plans a sequence of actions with a contact, one per step, in the
+    /// order of their dates. Each step is Planned: it shows in Follow-ups
+    /// on its day, and moves the contact along only once marked Done, when
+    /// the next step's date becomes their follow-up. Returns the steps' ids.
+    pub fn plan_sequence(&mut self, contact: u64, steps: &[Step]) -> Vec<u64> {
+        let mut steps = steps.to_vec();
+        steps.sort_by_key(|s| s.date);
+        let contact = contact.to_string();
+        let mut ids: Vec<u64> = Vec::new();
+        for (n, step) in steps.iter().enumerate() {
+            let next = steps.get(n + 1);
+            let kind = if step.kind.trim().is_empty() {
+                "Message sent"
+            } else {
+                step.kind.as_str()
+            };
+            let first = ids.first().map(u64::to_string);
+            let date = iso(step.date);
+            let next_date = next.map(|s| iso(s.date)).unwrap_or_default();
+            let mut cells = vec![
+                ("date", date.as_str()),
+                ("action", step.action.trim()),
+                ("type", kind),
+                ("status", "Planned"),
+                ("contact", contact.as_str()),
+                ("notes", step.notes.trim()),
+                ("follow_up_on", next_date.as_str()),
+                ("follow_up", next.map_or("", |s| s.action.trim())),
+            ];
+            cells.retain(|(_, v)| !v.is_empty());
+            let id = self.add_with(Sheet::Actions, &cells);
+            let first = first.unwrap_or_else(|| id.to_string());
+            self.set_cell(Sheet::Actions, id, SEQUENCE, first);
+            ids.push(id);
+        }
+        ids
+    }
+
+    /// Cancels the steps still planned in a contact's sequences, as a reply
+    /// or a decision does. They stay in Field progress, marked Cancelled.
+    /// Returns how many.
+    pub fn cancel_sequences(&mut self, contact: u64) -> usize {
+        let contact = contact.to_string();
+        let mut n = 0;
+        for row in &mut self.actions {
+            if row.get("contact") == contact && is_planned(row) && !row.get(SEQUENCE).is_empty() {
+                row.cells.insert("status".into(), "Cancelled".into());
+                n += 1;
+            }
+        }
+        n
+    }
+
+    /// Writes a cell with nothing following from it.
+    fn set_cell(&mut self, sheet: Sheet, id: u64, key: &str, value: String) {
+        if let Some(row) = self.rows_mut(sheet).iter_mut().find(|r| r.id == id) {
+            row.cells.insert(key.to_string(), value);
+        }
+    }
+
+    /// A contact that says nothing about anyone: no name, no email, nothing
+    /// but the stage a new line starts with, and nothing done with them.
+    pub fn is_blank_contact(&self, row: &Row) -> bool {
+        let id = row.id.to_string();
+        row.cells
+            .iter()
+            .all(|(k, v)| k == "stage" || v.trim().is_empty())
+            && !self.actions.iter().any(|a| a.get("contact") == id)
+    }
+
+    /// Deletes the contacts left blank, such as one added and closed before
+    /// anything was typed in it, but `keep`, the one being filled in. True
+    /// when one went.
+    pub fn drop_blank_contacts(&mut self, keep: Option<u64>) -> bool {
+        let blank: Vec<u64> = self
+            .contacts
+            .iter()
+            .filter(|r| Some(r.id) != keep && self.is_blank_contact(r))
+            .map(|r| r.id)
+            .collect();
+        self.contacts.retain(|r| !blank.contains(&r.id));
+        !blank.is_empty()
     }
 
     /// What logging an action with someone says about them, written on
@@ -779,7 +934,7 @@ impl Cockpit {
         let Some(row) = self.row(Sheet::Actions, action) else {
             return;
         };
-        if row.get("action").trim().is_empty() {
+        if row.get("action").trim().is_empty() || !is_done(row) {
             return;
         }
         let Some(contact) = self.contact(row.get("contact")) else {
@@ -801,14 +956,25 @@ impl Cockpit {
         let what = row.get("follow_up").trim().to_string();
 
         let stage = forward_stage(contact.get("stage"), row.get("type"));
+        let replied = row.get("type") == "Reply received";
+        // Planned and cancelled actions were not done: the latest is among
+        // those that were.
         let latest = self
             .history(contact_id)
-            .first()
+            .into_iter()
+            .find(|r| is_done(r))
             .is_some_and(|newest| newest.get("date") <= date.as_str());
+        // A reply, or a step that moves them on, ends the sequence it was
+        // in: the next step it pointed to will not go out.
+        let ended = replied || stage.is_some_and(ends_sequences);
+        let in_sequence = !row.get(SEQUENCE).is_empty();
+        if replied {
+            self.cancel_sequences(contact_id);
+        }
         if let Some(stage) = stage {
             self.set(Sheet::Contacts, contact_id, "stage", stage.to_string());
         }
-        if latest && !due.is_empty() {
+        if latest && !due.is_empty() && !(ended && in_sequence) {
             self.set(Sheet::Contacts, contact_id, "follow_up", due);
             if !what.is_empty() {
                 self.set(Sheet::Contacts, contact_id, "next", what);
@@ -884,7 +1050,15 @@ impl Cockpit {
             .filter_map(|sheet| Some((sheet, sheet.follow_up()?)))
             .flat_map(|(sheet, (date_key, what_key))| {
                 self.active(sheet).filter_map(move |row| {
-                    let date = row.get(date_key);
+                    let planned = sheet == Sheet::Actions && is_planned(row);
+                    if sheet == Sheet::Actions && !planned && !is_done(row) {
+                        return None;
+                    }
+                    let date = if planned {
+                        row.get("date")
+                    } else {
+                        row.get(date_key)
+                    };
                     let urgency = Urgency::of(date, today)?;
                     if date > until {
                         return None;
@@ -892,19 +1066,32 @@ impl Cockpit {
                     // An action's follow-up its contact took over (see
                     // update_contact) is listed once, under the contact.
                     if sheet == Sheet::Actions
+                        && !planned
                         && self
                             .contact(row.get("contact"))
                             .is_some_and(|c| c.get("follow_up") == date)
                     {
                         return None;
                     }
+                    // A contact whose follow-up is a step planned for that
+                    // day is listed once, as the step: doing it is marking
+                    // it done.
+                    if sheet == Sheet::Contacts && self.planned_on(row.id, date) {
+                        return None;
+                    }
+                    let what = if planned {
+                        format!("Planned: {}", row.get("type"))
+                    } else {
+                        row.get(what_key).to_string()
+                    };
                     Some(FollowUp {
                         sheet,
                         id: row.id,
                         due: date.to_string(),
                         urgency,
+                        planned,
                         title: row.get(sheet.title_key()).to_string(),
-                        what: row.get(what_key).to_string(),
+                        what,
                         contact: self
                             .contact(row.get("contact"))
                             .map_or_else(String::new, |c| c.get("name").to_string()),
@@ -916,10 +1103,35 @@ impl Cockpit {
         due
     }
 
+    /// Whether a step is planned with this contact on this day.
+    fn planned_on(&self, contact: u64, date: &str) -> bool {
+        let id = contact.to_string();
+        self.active(Sheet::Actions)
+            .any(|a| a.get("contact") == id && is_planned(a) && a.get("date") == date)
+    }
+
+    /// The cell a line is listed in Follow-ups by: a planned action's own
+    /// date, else the table's follow-up date.
+    pub fn due_key(&self, sheet: Sheet, id: u64) -> Option<&'static str> {
+        let (key, _) = sheet.follow_up()?;
+        let planned = sheet == Sheet::Actions && self.row(sheet, id).is_some_and(is_planned);
+        Some(if planned { "date" } else { key })
+    }
+
+    /// Done with a follow-up: a planned action is marked done, today; any
+    /// other line's follow-up date is cleared.
+    pub fn follow_up_done(&mut self, sheet: Sheet, id: u64, today: NaiveDate) {
+        match self.due_key(sheet, id) {
+            Some("date") => self.complete(id, today),
+            Some(key) => self.set(sheet, id, key, String::new()),
+            None => {}
+        }
+    }
+
     /// Moves a line's follow-up date `days` later than it was, or than
-    /// today when it has none.
+    /// today when it has none. A planned action moves to that day.
     pub fn postpone(&mut self, sheet: Sheet, id: u64, days: i64, today: NaiveDate) {
-        let Some((key, _)) = sheet.follow_up() else {
+        let Some(key) = self.due_key(sheet, id) else {
             return;
         };
         let from = self
@@ -1556,5 +1768,113 @@ mod tests {
         assert_eq!(json.matches("archived").count(), 1, "{json}");
         let back: Cockpit = serde_json::from_str(&json).unwrap();
         assert_eq!(back, cockpit);
+    }
+    #[test]
+    fn a_planned_action_changes_nothing_until_it_is_done() {
+        let mut cockpit = Cockpit::default();
+        let lea = cockpit.add_with(Sheet::Contacts, &[("name", "Léa")]);
+        let id = cockpit.add(Sheet::Actions, day());
+        assert_eq!(
+            cockpit.row(Sheet::Actions, id).unwrap().get("status"),
+            "Done"
+        );
+        cockpit.set(Sheet::Actions, id, "status", "Planned".into());
+        cockpit.set(Sheet::Actions, id, "date", "2026-11-13".into());
+        cockpit.set(Sheet::Actions, id, "action", "Email #2".into());
+        cockpit.set(Sheet::Actions, id, "contact", lea.to_string());
+        cockpit.set(Sheet::Actions, id, "follow_up_on", "2026-11-20".into());
+        assert_eq!(cell(&cockpit, lea, "stage"), "");
+        assert_eq!(cell(&cockpit, lea, "follow_up"), "");
+        // Listed on its own day, as a step to do.
+        let due = cockpit.follow_ups(day());
+        assert_eq!(due.len(), 1);
+        assert!(due[0].planned);
+        assert_eq!(due[0].due, "2026-11-13");
+        // Done today: it takes today's date and moves her along.
+        cockpit.follow_up_done(Sheet::Actions, id, day());
+        let row = cockpit.row(Sheet::Actions, id).unwrap();
+        assert_eq!(row.get("status"), "Done");
+        assert_eq!(row.get("date"), "2026-11-11");
+        assert_eq!(cell(&cockpit, lea, "stage"), "Contacted");
+        assert_eq!(cell(&cockpit, lea, "follow_up"), "2026-11-20");
+    }
+
+    fn steps() -> Vec<Step> {
+        [0, 3, 7]
+            .iter()
+            .enumerate()
+            .map(|(n, d)| Step {
+                date: day() + chrono::Duration::days(*d),
+                action: format!("Email #{}", n + 1),
+                notes: String::new(),
+                kind: String::new(),
+            })
+            .collect()
+    }
+
+    #[test]
+    fn a_sequence_goes_one_step_at_a_time() {
+        let mut cockpit = Cockpit::default();
+        let lea = cockpit.add_with(Sheet::Contacts, &[("name", "Léa"), ("stage", "Lead")]);
+        let ids = cockpit.plan_sequence(lea, &steps());
+        assert_eq!(ids.len(), 3);
+        assert_eq!(cell(&cockpit, lea, "stage"), "Lead");
+        let until = NaiveDate::from_ymd_opt(2026, 11, 30).unwrap();
+        let due: Vec<u64> = cockpit.due_by(day(), until).iter().map(|f| f.id).collect();
+        assert_eq!(due, ids);
+
+        cockpit.complete(ids[0], day());
+        assert_eq!(cell(&cockpit, lea, "stage"), "Contacted");
+        assert_eq!(cell(&cockpit, lea, "follow_up"), "2026-11-14");
+        assert_eq!(cell(&cockpit, lea, "next"), "Email #2");
+        // Her follow-up is the next step: listed once, as the step.
+        let due: Vec<(Sheet, u64)> = cockpit
+            .due_by(day(), until)
+            .iter()
+            .map(|f| (f.sheet, f.id))
+            .collect();
+        assert_eq!(
+            due,
+            vec![(Sheet::Actions, ids[1]), (Sheet::Actions, ids[2])]
+        );
+    }
+
+    #[test]
+    fn a_reply_or_a_decision_cancels_the_steps_left() {
+        let mut cockpit = Cockpit::default();
+        let lea = cockpit.add_with(Sheet::Contacts, &[("name", "Léa"), ("stage", "Lead")]);
+        let ids = cockpit.plan_sequence(lea, &steps());
+        cockpit.complete(ids[0], day());
+        log(
+            &mut cockpit,
+            lea,
+            &[("action", "She answered"), ("type", "Reply received")],
+        );
+        assert_eq!(cell(&cockpit, lea, "stage"), "In conversation");
+        let status = |c: &Cockpit, id| c.row(Sheet::Actions, id).unwrap().get("status").to_string();
+        assert_eq!(status(&cockpit, ids[0]), "Done");
+        assert_eq!(status(&cockpit, ids[1]), "Cancelled");
+        assert_eq!(status(&cockpit, ids[2]), "Cancelled");
+        assert!(cockpit.follow_ups(day()).iter().all(|f| !f.planned));
+
+        let tom = cockpit.add_with(Sheet::Contacts, &[("name", "Tom"), ("stage", "Contacted")]);
+        let ids = cockpit.plan_sequence(tom, &steps());
+        cockpit.set(Sheet::Contacts, tom, "stage", "Not now".into());
+        assert!(ids.iter().all(|id| status(&cockpit, *id) == "Cancelled"));
+    }
+
+    #[test]
+    fn a_contact_left_blank_goes_but_not_the_one_being_filled_in() {
+        let mut cockpit = Cockpit::default();
+        let blank = cockpit.add(Sheet::Contacts, day());
+        let open = cockpit.add(Sheet::Contacts, day());
+        let tied = cockpit.add(Sheet::Contacts, day());
+        cockpit.add_with(Sheet::Actions, &[("contact", &tied.to_string())]);
+        let named = cockpit.add_with(Sheet::Contacts, &[("email", "a@b.ch")]);
+        assert!(cockpit.drop_blank_contacts(Some(open)));
+        let left: Vec<u64> = cockpit.contacts.iter().map(|r| r.id).collect();
+        assert_eq!(left, vec![open, tied, named]);
+        assert!(!cockpit.drop_blank_contacts(Some(open)));
+        assert!(!cockpit.contacts.iter().any(|r| r.id == blank));
     }
 }

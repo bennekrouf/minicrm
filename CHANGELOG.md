@@ -1,5 +1,29 @@
 # Changelog
 
+## [Unreleased]
+
+### Added
+
+- Actions can now be planned rather than done. A planned action leaves its
+  contact's stage, next step and follow-up alone, shows in Follow-ups on its
+  own day, and does its usual work only once you mark it Done (from
+  Follow-ups, it then takes today's date). Actions from before read as done.
+- Claude can plan a whole cadence of messages for a contact at once, such as
+  emails on days 0, 3, 7, 12 and 18. Each step waits as a planned action, and
+  marking one done makes the next step their follow-up. A reply, logged as
+  the new Reply received type, or moving the contact past Contacted cancels
+  the steps left.
+- Actions have a Message or notes field, for the text of a planned message.
+- When Claude reads an action, it also sees the next follow-up of the contact
+  it was with.
+
+### Fixed
+
+- A contact needs a name or an email: Claude can no longer add one with
+  neither, or clear both, and an import skips such lines. A contact added
+  in the window and closed before anything was typed in it is removed
+  instead of showing up in the pipeline counts.
+
 ## [0.1.10] - 2026-11-24
 
 ### Changed
