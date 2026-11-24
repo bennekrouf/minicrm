@@ -1,6 +1,6 @@
 [package]
 name = "minicrm"
-version = "0.1.10"
+version = "0.1.11"
 edition = "2021"
 description = "A weekly cockpit for someone starting a business: priorities, field actions, weak signals and open questions"
 publish = false
