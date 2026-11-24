@@ -65,14 +65,21 @@ fn Item(item: FollowUp) -> Element {
     let ui = use_context::<Ui>();
     let mut cockpit = use_context::<Signal<Cockpit>>();
     let (sheet, id) = (item.sheet, item.id);
-    let Some((date_key, _)) = sheet.follow_up() else {
+    if sheet.follow_up().is_none() {
         return rsx! {};
-    };
+    }
     let today = (ui.today)();
     let kind = if sheet == Sheet::Contacts {
         "Contact"
+    } else if item.planned {
+        "Planned"
     } else {
         "Action"
+    };
+    let (later, done) = if item.planned {
+        ("Move it a week later", "Done: mark it done today")
+    } else {
+        ("Ask again a week from now", "Followed up: clear the date")
     };
 
     rsx! {
@@ -95,14 +102,14 @@ fn Item(item: FollowUp) -> Element {
             }
             button {
                 class: "btn btn-small",
-                title: "Ask again a week from now",
+                title: "{later}",
                 onclick: move |_| cockpit.write().postpone(sheet, id, 7, today),
                 "In a week"
             }
             button {
                 class: "btn btn-small",
-                title: "Followed up: clear the date",
-                onclick: move |_| cockpit.write().set(sheet, id, date_key, String::new()),
+                title: "{done}",
+                onclick: move |_| cockpit.write().follow_up_done(sheet, id, today),
                 "Done"
             }
         }

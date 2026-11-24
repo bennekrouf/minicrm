@@ -91,6 +91,10 @@ pub fn import(
                     .find(|(k, _)| *k == key)
                     .map_or("", |(_, v)| v.as_str())
             };
+            // Nobody to know them by: not a contact.
+            if cell("name").trim().is_empty() && cell("email").trim().is_empty() {
+                continue;
+            }
             if cockpit.contact_named(cell("name")).is_some()
                 || cockpit.contact_with_email(cell("email")).is_some()
             {

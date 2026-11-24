@@ -14,8 +14,8 @@ use serde_json::{json, Map, Value};
 use desktop_kit::library::Item;
 
 use crate::model::{
-    end_of_week, iso, start_of_week, today, week_label, Cockpit, Column, Kind, Row, Sheet, Urgency,
-    GOAL_STATUS, STAGES,
+    end_of_week, iso, start_of_week, today, week_label, Cockpit, Column, Kind, Row, Sheet, Step,
+    Urgency, GOAL_STATUS, SEQUENCE, STAGES,
 };
 use crate::{media, store, transfer};
 
@@ -34,8 +34,12 @@ contact they were with; get_line on a contact gives what was done with them. An 
 with a contact updates them on its own: a message sent makes a lead Contacted, a call or \
 interview puts them In conversation, and the action's follow_up_on and follow_up become their \
 follow-up and next step (with none, their follow-up stays as it was), so don't repeat it on \
-the contact. Proposal sent, Client and Not now are only ever set by hand. follow_ups lists who \
-to get back to. A line done with, such as a contact set to Not now or last month's goals, is \
+the contact. Proposal sent, Client and Not now are only ever set by hand. An action is Done \
+unless its status says Planned: a planned one changes nothing on the contact until it is marked \
+Done (update_line status Done, or set_follow_up done), and is listed by follow_ups on its date. To \
+plan several messages at once, such as a cadence of emails on days 0, 3, 7, use plan_sequence, \
+never actions logged as done in advance: a reply (an action of type Reply received) or a stage \
+past Contacted cancels the steps still planned. follow_ups lists who to get back to. A line done with, such as a contact set to Not now or last month's goals, is \
 archived with archive_line rather than deleted: it leaves the table, the counts and follow-ups, \
 and list_lines with archived: true finds it. The network holds people known but not worked \
 with, such as LinkedIn connections imported with import_csv network: true: they stay out of \
@@ -91,8 +95,38 @@ fn run(cockpit: &mut Cockpit, name: &str, args: &Value, today: NaiveDate) -> Res
             let sheet = table(args)?;
             let id = line_id(cockpit, sheet, args)?;
             let cells = cells(cockpit, sheet, args, Some(id))?;
+            if sheet == Sheet::Contacts {
+                let after = |key: &str| {
+                    cells
+                        .iter()
+                        .find(|(k, _)| *k == key)
+                        .map(|(_, v)| v.clone())
+                        .unwrap_or_else(|| {
+                            cockpit
+                                .row(sheet, id)
+                                .map_or_else(String::new, |r| r.get(key).to_string())
+                        })
+                };
+                if after("name").trim().is_empty() && after("email").trim().is_empty() {
+                    return Err("a contact keeps a name or an email: give one of them".into());
+                }
+            }
+            // Marked done now: a step planned for later takes today's date,
+            // unless the call gives one.
+            let done_now = sheet == Sheet::Actions
+                && cockpit
+                    .row(sheet, id)
+                    .is_some_and(|r| !crate::model::is_done(r))
+                && cells.iter().any(|(k, v)| *k == "status" && v == "Done")
+                && !cells.iter().any(|(k, _)| *k == "date");
             for (key, value) in cells {
+                if done_now && key == "status" {
+                    continue;
+                }
                 cockpit.set(sheet, id, key, value);
+            }
+            if done_now {
+                cockpit.complete(id, today);
             }
             Ok(line_json(cockpit, sheet, id, false))
         }
@@ -109,6 +143,7 @@ fn run(cockpit: &mut Cockpit, name: &str, args: &Value, today: NaiveDate) -> Res
         "archive_line" => archive_line(cockpit, args),
         "set_network" => set_network(cockpit, args),
         "follow_ups" => follow_ups(cockpit, args, today),
+        "plan_sequence" => plan_sequence(cockpit, args, today),
         "set_follow_up" => set_follow_up(cockpit, args, today),
         "import_csv" => {
             let sheet = table(args)?;
@@ -387,23 +422,41 @@ fn set_network(cockpit: &mut Cockpit, args: &Value) -> Result<Value, String> {
 
 fn add_line(cockpit: &mut Cockpit, args: &Value, today: NaiveDate) -> Result<Value, String> {
     let sheet = table(args)?;
-    let cells = cells(cockpit, sheet, args, None)?;
+    let mut cells = cells(cockpit, sheet, args, None)?;
     if sheet == Sheet::Contacts {
-        let name = cells
-            .iter()
-            .find(|(k, _)| *k == "name")
-            .map(|(_, v)| v.as_str())
-            .unwrap_or("");
-        if name.trim().is_empty() {
-            return Err("a contact needs a name: cells.name".into());
+        let given = |key: &str| {
+            cells
+                .iter()
+                .find(|(k, _)| *k == key)
+                .map(|(_, v)| v.trim().to_string())
+                .unwrap_or_default()
+        };
+        let (name, email) = (given("name"), given("email"));
+        if name.is_empty() && email.is_empty() {
+            return Err("a contact needs a name or an email: cells.name or cells.email".into());
         }
-        if let Some(there) = cockpit.contact_named(name) {
+        if let Some(there) = cockpit.contact_named(&name) {
             return Err(format!(
                 "{name} is already a contact, id {}: update_line it instead",
                 there.id
             ));
         }
+        if let Some(there) = cockpit.contact_with_email(&email) {
+            return Err(format!(
+                "{email} is already contact {}, id {}: update_line it instead",
+                there.get("name"),
+                there.id
+            ));
+        }
+        // Known by their email only: it names them until a name is given.
+        if name.is_empty() {
+            cells.retain(|(k, _)| *k != "name");
+            cells.push(("name", email));
+        }
     }
+    // A planned action must be planned before it names its contact, or
+    // it would count as done for a moment and move them along.
+    cells.sort_by_key(|(k, _)| *k != "status");
     let id = cockpit.add(sheet, today);
     for (key, value) in cells {
         cockpit.set(sheet, id, key, value);
@@ -429,6 +482,7 @@ fn follow_ups(cockpit: &Cockpit, args: &Value, today: NaiveDate) -> Result<Value
                 "title": f.title,
                 "what": nonempty(&f.what),
                 "contact": nonempty(&f.contact),
+                "planned": f.planned,
             })
         })
         .collect();
@@ -444,20 +498,96 @@ fn set_follow_up(cockpit: &mut Cockpit, args: &Value, today: NaiveDate) -> Resul
         ));
     };
     let id = line_id(cockpit, sheet, args)?;
-    let date = if args["done"].as_bool().unwrap_or(false) {
-        String::new()
-    } else if let Some(days) = args["in_days"].as_i64() {
+    if args["done"].as_bool().unwrap_or(false) {
+        cockpit.follow_up_done(sheet, id, today);
+        if let Some(what) = optional(args, "what") {
+            cockpit.set(sheet, id, what_key, what);
+        }
+        return Ok(line_json(cockpit, sheet, id, false));
+    }
+    // A planned action is moved to the day it is now planned for.
+    let date_key = cockpit.due_key(sheet, id).unwrap_or(date_key);
+    let date = if let Some(days) = args["in_days"].as_i64() {
         iso(today + Duration::days(days))
     } else if let Some(v) = args["date"].as_str() {
         day(v)?
     } else {
         return Err("give date, in_days, or done: true".into());
     };
+    if date_key == "date" && date.is_empty() {
+        return Err("a planned action keeps its date: give one, or done: true".into());
+    }
     cockpit.set(sheet, id, date_key, date);
     if let Some(what) = optional(args, "what") {
         cockpit.set(sheet, id, what_key, what);
     }
     Ok(line_json(cockpit, sheet, id, false))
+}
+
+/// Plans a cadence of messages for one contact, or with `cancel` cancels
+/// the steps still planned for them.
+fn plan_sequence(cockpit: &mut Cockpit, args: &Value, today: NaiveDate) -> Result<Value, String> {
+    let contact = line_id(cockpit, Sheet::Contacts, args)?;
+    let name = cockpit
+        .row(Sheet::Contacts, contact)
+        .map(|r| r.get("name").to_string())
+        .unwrap_or_default();
+    if args["cancel"].as_bool().unwrap_or(false) {
+        let n = cockpit.cancel_sequences(contact);
+        return Ok(json!({ "contact": name, "contact_id": contact, "cancelled": n }));
+    }
+    let start = match optional(args, "start") {
+        Some(v) => {
+            transfer::read_day(&v).ok_or(format!("{v} is not a day: write it YYYY-MM-DD"))?
+        }
+        None => today,
+    };
+    let Some(given) = args["steps"].as_array().filter(|l| !l.is_empty()) else {
+        return Err("steps is required: a list of { day or date, action, notes, type }".into());
+    };
+    let types = Sheet::Actions
+        .columns()
+        .iter()
+        .find(|c| c.key == "type")
+        .ok_or("actions has no type column")?;
+    let mut steps = Vec::new();
+    for (n, step) in given.iter().enumerate() {
+        let at = |key: &str| optional(step, key);
+        let date = match (step["day"].as_i64(), at("date")) {
+            (_, Some(v)) => transfer::read_day(&v).ok_or(format!(
+                "step {}: {v} is not a day: write it YYYY-MM-DD",
+                n + 1
+            ))?,
+            (Some(day), None) if day >= 0 => start + Duration::days(day),
+            _ => {
+                return Err(format!(
+                    "step {}: give day (from start, 0 or more) or date",
+                    n + 1
+                ))
+            }
+        };
+        let action = at("action").ok_or(format!(
+            "step {}: action is required: what will be sent",
+            n + 1
+        ))?;
+        let kind = match at("type") {
+            Some(v) => choice(types, &v)?,
+            None => String::new(),
+        };
+        steps.push(Step {
+            date,
+            action,
+            notes: at("notes").unwrap_or_default(),
+            kind,
+        });
+    }
+    let ids = cockpit.plan_sequence(contact, &steps);
+    let lines: Vec<Value> = ids
+        .iter()
+        .filter_map(|id| cockpit.row(Sheet::Actions, *id))
+        .map(|r| row_json(cockpit, Sheet::Actions, r))
+        .collect();
+    Ok(json!({ "contact": name, "contact_id": contact, "planned": lines }))
 }
 
 // ── Lines in and out ─────────────────────────────────────────────────────
@@ -485,11 +615,18 @@ fn row_json(cockpit: &Cockpit, sheet: Sheet, row: &Row) -> Value {
         }
         if column.kind == Kind::Contact {
             if let Ok(id) = row.get(column.key).parse::<u64>() {
-                if cockpit.contact(row.get(column.key)).is_some() {
+                if let Some(contact) = cockpit.contact(row.get(column.key)) {
                     out.insert("contact_id".into(), json!(id));
+                    let due = contact.get("follow_up");
+                    if !due.is_empty() {
+                        out.insert("contact_follow_up".into(), json!(due));
+                    }
                 }
             }
         }
+    }
+    if !row.get(SEQUENCE).is_empty() {
+        out.insert(SEQUENCE.into(), json!(row.get(SEQUENCE)));
     }
     Value::Object(out)
 }
@@ -786,7 +923,7 @@ fn tools() -> Value {
         },
         {
             "name": "set_follow_up",
-            "description": "Sets when to follow up a contact or an action: a date, a number of days from today, or done (clears it).",
+            "description": "Sets when to follow up a contact or an action: a date, a number of days from today, or done (clears it). For a planned action, the date moves the action itself, and done marks it Done today, with what that does to its contact.",
             "inputSchema": { "type": "object", "required": ["table"], "properties": {
                 "table": { "type": "string", "enum": ["contacts", "actions"] },
                 "id": id, "name": name,
@@ -797,8 +934,24 @@ fn tools() -> Value {
             }},
         },
         {
+            "name": "plan_sequence",
+            "description": "Plans a cadence of messages for one contact at once, e.g. days 0, 3, 7, 12, 18: one Planned action per step, listed by follow_ups on its day and changing nothing on the contact until marked Done; then the next step's date becomes their follow-up. A reply (an action of type Reply received) or a stage past Contacted cancels the steps left. cancel: true cancels them by hand.",
+            "inputSchema": { "type": "object", "properties": {
+                "id": { "type": "integer", "description": "The contact's id." }, "name": name,
+                "start": { "type": "string", "description": "YYYY-MM-DD the day offsets count from. Default today." },
+                "steps": { "type": "array", "items": { "type": "object", "required": ["action"], "properties": {
+                    "day": { "type": "integer", "minimum": 0, "description": "Days after start, 0 for that day." },
+                    "date": { "type": "string", "description": "YYYY-MM-DD, instead of day." },
+                    "action": { "type": "string", "description": "What will be sent: the subject." },
+                    "notes": { "type": "string", "description": "The message itself, or notes for it." },
+                    "type": { "type": "string", "description": "An action type; default Message sent." },
+                }}},
+                "cancel": { "type": "boolean", "description": "Cancel the contact's steps still planned instead." },
+            }},
+        },
+        {
             "name": "import_csv",
-            "description": "Adds the lines of a CSV file to a table, matching its headings to the columns; LinkedIn's Connections.csv works as it is. Contacts already there by name or email are left out. With network: true, contacts go to the network: searchable, but out of contacts, the counts and follow-ups, as fits a whole LinkedIn export.",
+            "description": "Adds the lines of a CSV file to a table, matching its headings to the columns; LinkedIn's Connections.csv works as it is. Contacts already there by name or email, and lines with neither, are left out. With network: true, contacts go to the network: searchable, but out of contacts, the counts and follow-ups, as fits a whole LinkedIn export.",
             "inputSchema": { "type": "object", "required": ["table", "path"], "properties": {
                 "table": table,
                 "path": { "type": "string", "description": "Absolute path of the CSV file." },
@@ -1254,5 +1407,119 @@ mod tests {
             err.contains("nothing in the media library is called Nope"),
             "{err}"
         );
+    }
+    #[test]
+    fn a_contact_needs_a_name_or_an_email() {
+        let mut c = examples();
+        let err = go(
+            &mut c,
+            "add_line",
+            json!({ "table": "contacts", "cells": { "stage": "Lead" }}),
+        )
+        .unwrap_err();
+        assert!(err.contains("name or an email"), "{err}");
+        let line = go(
+            &mut c,
+            "add_line",
+            json!({ "table": "contacts", "cells": { "email": "ada@example.com" }}),
+        )
+        .unwrap();
+        assert_eq!(line["name"], "ada@example.com");
+        let err = go(
+            &mut c,
+            "add_line",
+            json!({ "table": "contacts", "cells": { "name": "Ada", "email": "ADA@example.com" }}),
+        )
+        .unwrap_err();
+        assert!(err.contains("already contact"), "{err}");
+        let err = go(
+            &mut c,
+            "update_line",
+            json!({ "table": "contacts", "id": line["id"], "cells": { "name": "", "email": "" }}),
+        )
+        .unwrap_err();
+        assert!(err.contains("name or an email"), "{err}");
+    }
+
+    #[test]
+    fn a_planned_sequence_is_listed_then_done_step_by_step() {
+        let mut c = examples();
+        let karim = c.contact_named("Karim Benali").unwrap().id;
+        let stage = c
+            .row(Sheet::Contacts, karim)
+            .unwrap()
+            .get("stage")
+            .to_string();
+        let plan = go(
+            &mut c,
+            "plan_sequence",
+            json!({ "name": "Karim Benali", "steps": [
+                { "day": 0, "action": "Email #1", "notes": "Hi Karim" },
+                { "day": 3, "action": "Email #2" },
+                { "day": 7, "action": "Email #3" },
+            ]}),
+        )
+        .unwrap();
+        let steps = plan["planned"].as_array().unwrap();
+        assert_eq!(steps.len(), 3);
+        assert_eq!(steps[0]["status"], "Planned");
+        assert_eq!(steps[0]["notes"], "Hi Karim");
+        assert_eq!(steps[1]["date"], "2026-11-14");
+        assert_eq!(steps[0]["sequence"], steps[2]["sequence"]);
+        assert_eq!(c.row(Sheet::Contacts, karim).unwrap().get("stage"), stage);
+
+        let due = go(&mut c, "follow_ups", json!({})).unwrap();
+        let planned: Vec<&Value> = due["follow_ups"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|f| f["planned"] == true)
+            .collect();
+        assert_eq!(planned.len(), 2, "today's and Saturday's");
+
+        let first = steps[0]["id"].clone();
+        go(
+            &mut c,
+            "set_follow_up",
+            json!({ "table": "actions", "id": first, "done": true }),
+        )
+        .unwrap();
+        let karim_line = go(
+            &mut c,
+            "get_line",
+            json!({ "table": "contacts", "name": "Karim Benali" }),
+        )
+        .unwrap();
+        assert_eq!(karim_line["follow_up"], "2026-11-14");
+        assert_eq!(karim_line["next"], "Email #2");
+        let action = go(
+            &mut c,
+            "get_line",
+            json!({ "table": "actions", "id": first }),
+        )
+        .unwrap();
+        assert_eq!(action["contact_follow_up"], "2026-11-14");
+
+        let added = go(
+            &mut c,
+            "add_line",
+            json!({ "table": "actions", "cells": {
+                "action": "Planned call", "contact": "Karim Benali", "status": "planned", "type": "Call",
+            }}),
+        )
+        .unwrap();
+        assert_eq!(added["status"], "Planned");
+        assert_eq!(
+            c.row(Sheet::Contacts, karim).unwrap().get("stage"),
+            "Contacted"
+        );
+
+        let cancelled = go(
+            &mut c,
+            "plan_sequence",
+            json!({ "name": "Karim Benali", "cancel": true }),
+        )
+        .unwrap();
+        assert_eq!(cancelled["cancelled"], 2);
     }
 }

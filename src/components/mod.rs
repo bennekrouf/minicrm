@@ -12,7 +12,7 @@ mod tests;
 use chrono::NaiveDate;
 use dioxus::prelude::*;
 
-use crate::model::{today, Sheet};
+use crate::model::{today, Cockpit, Sheet};
 
 use followups::FollowUps;
 use guide::Guide;
@@ -91,6 +91,21 @@ impl Ui {
 #[component]
 pub fn Workspace() -> Element {
     let ui = use_context::<Ui>();
+    let mut cockpit = use_context::<Signal<Cockpit>>();
+    // A contact added and left before anything was typed in it goes once
+    // another line, or none, is open: it would only fill the counts.
+    use_effect(move || {
+        let keep = (ui.selected)();
+        let blank = {
+            let c = cockpit.peek();
+            c.contacts
+                .iter()
+                .any(|r| Some(r.id) != keep && c.is_blank_contact(r))
+        };
+        if blank {
+            cockpit.write().drop_blank_contacts(keep);
+        }
+    });
     rsx! {
         div { class: "body",
             Sidebar {}
