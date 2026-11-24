@@ -1,5 +1,17 @@
 # Changelog
 
+## [Unreleased]
+
+### Changed
+
+- The MCP window now connects MiniCRM for you. For Claude Desktop, Claude
+  Code, Codex and VS Code it shows whether MiniCRM is installed there and
+  running, with Install, Update and Uninstall buttons, and a Test that starts
+  the server and counts its tools. Before, you copied commands and edited
+  Claude's config file yourself; those steps are still there, under By hand.
+- Claude Desktop undoes a change made to its settings while it is open:
+  MiniCRM waits for you to quit it, then installs.
+
 ## [0.1.9] - 2026-11-22
 
 ### Changed

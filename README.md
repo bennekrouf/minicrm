@@ -54,8 +54,9 @@ that helps freelancers organise their prospecting), dated in the current week.
 ## From Claude or Codex
 
 `minicrm mcp` serves the cockpit to an MCP client over stdio, with no window.
-The header's Claude button shows the config entry and the one-line commands
-for Claude Desktop, Claude Code and Codex. Its tools:
+The **MCP** button at the top of the window installs it in Claude Desktop,
+Claude Code, Codex and VS Code, shows where it is installed and running, and
+tests it. Its tools:
 
 | Tool | What it does |
 | --- | --- |
