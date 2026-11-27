@@ -45,6 +45,9 @@ that helps freelancers organise their prospecting), dated in the current week.
   action or weekly goal can point at a video or post from the media library
   the apps share, and open it in the app that made it. A goal can name one
   that is only planned, and follows it once it is made.
+- Any line can carry files (**+ Attach files**, or drop them on its editor).
+  They are kept by path, not copied, and open in their usual app; one moved
+  or deleted since shows as **Missing**.
 - **Import CSV** adds lines from a spreadsheet, Notion or LinkedIn's
   connections export, matching the file's headings to the table's columns.
   **Export CSV** saves a table, one column per column, contacts by name.

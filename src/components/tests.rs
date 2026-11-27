@@ -20,6 +20,8 @@ struct At {
     library: bool,
     /// Tom Leroy, set to Not now, is archived.
     archive_tom: bool,
+    /// Files attached to the pre-sale offer, kept as given even if missing.
+    files: Vec<String>,
 }
 
 fn at(view: View) -> At {
@@ -30,6 +32,7 @@ fn at(view: View) -> At {
         empty: false,
         library: false,
         archive_tom: false,
+        files: Vec::new(),
     }
 }
 
@@ -79,6 +82,12 @@ fn Harness(at: At) -> Element {
         if at.library {
             let id = presale(&cockpit);
             cockpit.set(Sheet::Actions, id, "media", "publishkit:offer".into());
+        }
+        if !at.files.is_empty() {
+            let id = presale(&cockpit);
+            if let Some(row) = cockpit.actions.iter_mut().find(|r| r.id == id) {
+                row.attachments = at.files.clone();
+            }
         }
         if at.archive_tom {
             let tom = cockpit.contact_named("Tom Leroy").unwrap().id;
@@ -391,4 +400,45 @@ fn an_archived_contact_waits_under_its_own_chip() {
         ..at(contacts)
     });
     assert!(html.contains(">Archive</button>"));
+}
+
+#[test]
+fn an_editor_lists_its_files_and_marks_one_no_longer_there() {
+    let dir = std::env::temp_dir().join(format!("minicrm-ui-files-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let offer = dir.join("offer.pdf");
+    std::fs::write(&offer, "pdf").unwrap();
+    let gone = dir.join("old-banner.png");
+    let id = presale(&examples());
+    let html = render(At {
+        selected: Some(id),
+        files: vec![offer.display().to_string(), gone.display().to_string()],
+        ..at(View::Sheet(Sheet::Actions))
+    });
+    assert!(html.contains("Attachments"));
+    assert!(
+        html.contains(r#"<span class="attachment-name">offer.pdf</span>"#),
+        "{html}"
+    );
+    assert!(html.contains(r#"class="attachment attachment-missing""#));
+    assert!(html.contains(r#"<span class="pill pill-bad">Missing</span>"#));
+    assert_eq!(
+        html.matches(">Show</button>").count(),
+        1,
+        "only the file that is there"
+    );
+    assert!(html.contains("+ Attach files"));
+    std::fs::remove_dir_all(&dir).unwrap();
+}
+
+#[test]
+fn a_line_without_files_offers_to_attach_some() {
+    let id = examples().goals[0].id;
+    let html = render(At {
+        selected: Some(id),
+        ..at(View::Sheet(Sheet::Goals))
+    });
+    assert!(html.contains("+ Attach files"));
+    assert!(html.contains("or drop them here"));
+    assert!(!html.contains("attachment-list"));
 }

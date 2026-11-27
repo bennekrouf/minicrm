@@ -442,6 +442,40 @@ body {
 .history-empty { font-size: 11.5px; color: var(--text3); font-style: italic; }
 .history-add { align-self: flex-start; margin-top: 2px; }
 
+/* The files attached to a line, in its editor. The whole block takes a
+   drop. */
+.attachments { padding: 6px; margin: -6px; border: 1px dashed transparent; border-radius: 8px; }
+.attachments-over { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 8%, transparent); }
+.attachments .field-hint { margin-top: 0; }
+.attachment-list {
+    display: flex; flex-direction: column;
+    border: 1px solid var(--border2); border-radius: 6px; overflow: hidden;
+}
+.attachment {
+    display: flex; align-items: center; gap: 6px;
+    padding: 4px 6px 4px 0;
+    background: var(--bg0); border-bottom: 1px solid var(--border2);
+}
+.attachment:last-child { border-bottom: 0; }
+.attachment-open {
+    flex: 1; min-width: 0;
+    display: flex; align-items: center; gap: 8px;
+    padding: 5px 10px; text-align: left;
+    background: none; border: 0; color: var(--text1); cursor: pointer;
+    font-family: var(--mono); font-size: 12px;
+}
+.attachment-open:hover .attachment-name { text-decoration: underline; color: var(--accent); }
+.attachment-open:disabled { cursor: default; }
+.attachment-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.attachment-missing .attachment-name { color: var(--text3); text-decoration: line-through; }
+.attachment-missing .attachment-open:hover .attachment-name { color: var(--text3); }
+.attachment-remove {
+    flex-shrink: 0; width: 24px; height: 24px;
+    background: none; border: 0; border-radius: 4px;
+    color: var(--text3); font-size: 16px; cursor: pointer;
+}
+.attachment-remove:hover { background: var(--bg2); color: var(--text1); }
+
 .choices { display: flex; flex-wrap: wrap; gap: 6px; }
 .choice {
     font-family: var(--mono); font-size: 11px;

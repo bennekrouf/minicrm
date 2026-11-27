@@ -1,14 +1,15 @@
 //! The editor of one line, on the right: every column of its table as a
-//! field, saved as it is typed. A contact's editor also lists what was done
-//! with them.
+//! field, saved as it is typed, then the files attached to it. A contact's
+//! editor also lists what was done with them.
 
+use dioxus::html::HasFileData;
 use dioxus::prelude::*;
 
 use super::Ui;
 use desktop_kit::library::{Item, Status};
 
 use crate::media;
-use crate::model::{show_date, Cockpit, Column, Kind, Row, Sheet};
+use crate::model::{show_date, Attachment, Cockpit, Column, Kind, Row, Sheet};
 
 #[component]
 pub fn Detail(sheet: Sheet, id: u64) -> Element {
@@ -79,6 +80,7 @@ pub fn Detail(sheet: Sheet, id: u64) -> Element {
                         value: row.get(column.key).to_string(),
                     }
                 }
+                Attachments { sheet, id, files: row.attachments.clone() }
                 if sheet == Sheet::Contacts {
                     History { id }
                 }
@@ -240,6 +242,121 @@ fn Field(sheet: Sheet, id: u64, column: Column, value: String) -> Element {
         }
         Kind::Contact => rsx! { ContactField { sheet, id, column, value } },
         Kind::Media => rsx! { MediaField { sheet, id, column, value } },
+    }
+}
+
+/// The files attached to a line: each opens in the app the system uses for
+/// it, and one moved or deleted since says so instead. Files are added with
+/// a picker or dropped on the list, and kept where they are.
+#[component]
+fn Attachments(sheet: Sheet, id: u64, files: Vec<String>) -> Element {
+    let mut ui = use_context::<Ui>();
+    let mut cockpit = use_context::<Signal<Cockpit>>();
+    let mut over = use_signal(|| false);
+    let listed: Vec<Attachment> = files.iter().map(|p| Attachment::of(p)).collect();
+    let mut add = move |paths: Vec<std::path::PathBuf>| {
+        let mut refused = Vec::new();
+        let mut c = cockpit.write();
+        for path in paths {
+            if let Err(e) = c.attach(sheet, id, &path.display().to_string()) {
+                refused.push(e);
+            }
+        }
+        if !refused.is_empty() {
+            ui.notice
+                .set(Some(format!("Not attached: {}", refused.join("; "))));
+        }
+    };
+
+    rsx! {
+        div {
+            class: if over() { "field attachments attachments-over" } else { "field attachments" },
+            ondragover: move |e| {
+                e.prevent_default();
+                over.set(true);
+            },
+            ondragleave: move |_| over.set(false),
+            ondrop: move |e| {
+                e.prevent_default();
+                over.set(false);
+                add(e.files().iter().map(|f| f.path()).collect());
+            },
+            span { "Attachments" }
+            if !listed.is_empty() {
+                div { class: "attachment-list",
+                    for file in listed {
+                        div {
+                            key: "{file.path}",
+                            class: if file.exists { "attachment" } else { "attachment attachment-missing" },
+                            button {
+                                class: "attachment-open",
+                                title: if file.exists { "Open {file.path}" } else { "No longer at {file.path}" },
+                                disabled: !file.exists,
+                                onclick: {
+                                    let path = file.path.clone();
+                                    move |_| {
+                                        if let Err(e) = desktop_kit::launch::open_file(std::path::Path::new(&path)) {
+                                            ui.notice.set(Some(e));
+                                        }
+                                    }
+                                },
+                                span { class: "attachment-name", "{file.name}" }
+                                if !file.exists {
+                                    span { class: "pill pill-bad", "Missing" }
+                                }
+                            }
+                            if file.exists {
+                                button {
+                                    class: "btn btn-small",
+                                    title: "Show it in its folder",
+                                    onclick: {
+                                        let path = file.path.clone();
+                                        move |_| {
+                                            if let Err(e) = desktop_kit::launch::reveal(std::path::Path::new(&path)) {
+                                                ui.notice.set(Some(e));
+                                            }
+                                        }
+                                    },
+                                    "Show"
+                                }
+                            }
+                            button {
+                                class: "attachment-remove",
+                                title: "Take it off this line (the file itself stays)",
+                                aria_label: "Remove {file.name}",
+                                onclick: {
+                                    let path = file.path.clone();
+                                    move |_| {
+                                        let _ = cockpit.write().detach(sheet, id, &path);
+                                    }
+                                },
+                                "\u{d7}"
+                            }
+                        }
+                    }
+                }
+            }
+            div { class: "field-row",
+                button {
+                    class: "btn btn-small",
+                    title: "Attach documents or images to this line. They stay where they are.",
+                    onclick: move |_| {
+                        spawn(async move {
+                            let Some(picked) = rfd::AsyncFileDialog::new()
+                                .set_title("Attach files")
+                                .pick_files()
+                                .await
+                            else {
+                                return;
+                            };
+                            add(picked.iter().map(|f| f.path().to_path_buf()).collect());
+                        });
+                    },
+                    "+ Attach files"
+                }
+                span { class: "field-hint", "or drop them here" }
+            }
+        }
     }
 }
 
