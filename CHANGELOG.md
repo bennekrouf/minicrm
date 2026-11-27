@@ -1,5 +1,19 @@
 # Changelog
 
+## [Unreleased]
+
+### Added
+
+- Any line can now carry files: a document, an image, the copy for a post.
+  Attach them with + Attach files in the line's editor, or drop them there;
+  click one to open it in its usual app, or Show it in its folder. Files stay
+  where they are, so a document you keep editing opens as it is now. One
+  moved or deleted since stays on the line, marked Missing, until you remove
+  it. This is separate from the video or post a line names from the media
+  library.
+- Claude can attach files to a line when adding or updating it, take them
+  off, and sees each line's files when it reads them.
+
 ## [0.1.11] - 2026-11-24
 
 ### Added

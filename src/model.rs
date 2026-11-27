@@ -602,6 +602,12 @@ pub struct Row {
     /// shows only in a search until added to Contacts.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub network: bool,
+    /// The files attached to the line, by absolute path, in the order they
+    /// were attached. Kept where they are rather than copied: a document
+    /// still being worked on opens as it is now, not as it was the day it
+    /// was attached. One moved or deleted since reads as missing.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub attachments: Vec<String>,
 }
 
 impl Row {
@@ -609,6 +615,58 @@ impl Row {
     pub fn get(&self, key: &str) -> &str {
         self.cells.get(key).map_or("", String::as_str)
     }
+
+    /// The files attached to the line, each as it stands on disk now.
+    pub fn attachments(&self) -> Vec<Attachment> {
+        self.attachments.iter().map(|p| Attachment::of(p)).collect()
+    }
+}
+
+/// A file attached to a line, as it stands on disk now.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Attachment {
+    /// Where it was attached from.
+    pub path: String,
+    /// Its file name, as the editor shows it.
+    pub name: String,
+    /// Still there. A file moved or deleted since stays on the line,
+    /// marked missing, until it is removed.
+    pub exists: bool,
+}
+
+impl Attachment {
+    pub fn of(path: &str) -> Self {
+        let p = std::path::Path::new(path);
+        Self {
+            path: path.to_string(),
+            name: p
+                .file_name()
+                .map_or_else(|| path.to_string(), |n| n.to_string_lossy().into_owned()),
+            exists: p.exists(),
+        }
+    }
+}
+
+/// A path to attach, as it will be kept: trimmed, `~` read as the home
+/// folder. Refused unless it is absolute and names a file that is there.
+pub fn attachment_path(given: &str) -> Result<String, String> {
+    let given = given.trim();
+    let path = match given.strip_prefix("~/") {
+        Some(rest) => dirs::home_dir().map_or_else(|| given.into(), |h| h.join(rest)),
+        None => std::path::PathBuf::from(given),
+    };
+    if given.is_empty() {
+        return Err("an attachment is a file's absolute path".into());
+    }
+    if !path.is_absolute() {
+        return Err(format!(
+            "{given} is not an absolute path: give the whole path, from /"
+        ));
+    }
+    if !path.is_file() {
+        return Err(format!("there is no file at {}", path.display()));
+    }
+    Ok(path.display().to_string())
 }
 
 /// Everything the app keeps: the five tables.
@@ -723,8 +781,66 @@ impl Cockpit {
             cells,
             archived: false,
             network: false,
+            attachments: Vec::new(),
         });
         id
+    }
+
+    /// Attaches a file to a line by its path (see [`attachment_path`]). A
+    /// file already attached is left as it is. Returns the path as kept.
+    pub fn attach(&mut self, sheet: Sheet, id: u64, path: &str) -> Result<String, String> {
+        let path = attachment_path(path)?;
+        let row = self
+            .rows_mut(sheet)
+            .iter_mut()
+            .find(|r| r.id == id)
+            .ok_or_else(|| format!("{} has no line {id}", sheet.id()))?;
+        if !row.attachments.contains(&path) {
+            row.attachments.push(path.clone());
+        }
+        Ok(path)
+    }
+
+    /// Takes a file off a line, named by the path it was attached from or,
+    /// when only one has it, by its file name. The file itself is left
+    /// alone. Returns the path it had.
+    pub fn detach(&mut self, sheet: Sheet, id: u64, which: &str) -> Result<String, String> {
+        let which = which.trim();
+        let row = self
+            .rows_mut(sheet)
+            .iter_mut()
+            .find(|r| r.id == id)
+            .ok_or_else(|| format!("{} has no line {id}", sheet.id()))?;
+        let at = match row.attachments.iter().position(|p| p == which) {
+            Some(at) => at,
+            None => {
+                let named: Vec<usize> = row
+                    .attachments
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, p)| Attachment::of(p).name.eq_ignore_ascii_case(which))
+                    .map(|(n, _)| n)
+                    .collect();
+                match named[..] {
+                    [at] => at,
+                    [] if row.attachments.is_empty() => {
+                        return Err(format!("line {id} has no attachments"))
+                    }
+                    [] => {
+                        return Err(format!(
+                            "line {id} has no attachment {which}; it has {}",
+                            row.attachments.join(", ")
+                        ))
+                    }
+                    _ => {
+                        return Err(format!(
+                            "line {id} has several files called {which}: give the whole path"
+                        ))
+                    }
+                }
+            }
+        };
+        Ok(row.attachments.remove(at))
     }
 
     /// The lines of a table still in use, archived ones and the network
@@ -1876,5 +1992,112 @@ mod tests {
         assert_eq!(left, vec![open, tied, named]);
         assert!(!cockpit.drop_blank_contacts(Some(open)));
         assert!(!cockpit.contacts.iter().any(|r| r.id == blank));
+    }
+
+    /// A folder of its own for each test, with these files in it.
+    fn files(name: &str, names: &[&str]) -> std::path::PathBuf {
+        let dir =
+            std::env::temp_dir().join(format!("minicrm-attach-{}-{name}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        for n in names {
+            std::fs::write(dir.join(n), "x").unwrap();
+        }
+        dir
+    }
+
+    #[test]
+    fn files_are_attached_listed_and_removed() {
+        let dir = files("model", &["copy.md", "banner.png"]);
+        let copy = dir.join("copy.md").display().to_string();
+        let banner = dir.join("banner.png").display().to_string();
+        let mut cockpit = Cockpit::default();
+        let id = cockpit.add_with(Sheet::Actions, &[("action", "Update the page")]);
+        assert_eq!(cockpit.attach(Sheet::Actions, id, &copy).unwrap(), copy);
+        cockpit.attach(Sheet::Actions, id, &banner).unwrap();
+        cockpit.attach(Sheet::Actions, id, &copy).unwrap();
+        let row = cockpit.row(Sheet::Actions, id).unwrap();
+        assert_eq!(
+            row.attachments,
+            vec![copy.clone(), banner.clone()],
+            "once each"
+        );
+        let names: Vec<String> = row.attachments().into_iter().map(|a| a.name).collect();
+        assert_eq!(names, ["copy.md", "banner.png"]);
+        assert!(row.attachments().iter().all(|a| a.exists));
+
+        // A copy of the line keeps its files.
+        let twin = cockpit.duplicate(Sheet::Actions, id).unwrap();
+        assert_eq!(
+            cockpit.row(Sheet::Actions, twin).unwrap().attachments.len(),
+            2
+        );
+
+        // By file name, or by the whole path.
+        assert_eq!(
+            cockpit.detach(Sheet::Actions, id, "BANNER.png").unwrap(),
+            banner
+        );
+        assert_eq!(cockpit.detach(Sheet::Actions, id, &copy).unwrap(), copy);
+        assert!(cockpit
+            .row(Sheet::Actions, id)
+            .unwrap()
+            .attachments
+            .is_empty());
+        assert!(dir.join("copy.md").exists(), "the file itself stays");
+        let err = cockpit.detach(Sheet::Actions, id, "copy.md").unwrap_err();
+        assert!(err.contains("no attachments"), "{err}");
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn only_a_file_that_is_there_is_attached() {
+        let dir = files("refused", &["real.md"]);
+        let mut cockpit = Cockpit::default();
+        let id = cockpit.add(Sheet::Goals, day());
+        let err = cockpit
+            .attach(Sheet::Goals, id, "notes/copy.md")
+            .unwrap_err();
+        assert!(err.contains("not an absolute path"), "{err}");
+        let gone = dir.join("nope.md").display().to_string();
+        let err = cockpit.attach(Sheet::Goals, id, &gone).unwrap_err();
+        assert!(err.contains("no file at"), "{err}");
+        let err = cockpit
+            .attach(Sheet::Goals, id, &dir.display().to_string())
+            .unwrap_err();
+        assert!(err.contains("no file at"), "a folder is not a file: {err}");
+        let real = dir.join("real.md").display().to_string();
+        let err = cockpit.attach(Sheet::Goals, 999, &real).unwrap_err();
+        assert!(err.contains("no line 999"), "{err}");
+        assert!(cockpit.goals[0].attachments.is_empty());
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn a_file_moved_since_reads_as_missing_and_can_still_be_removed() {
+        let dir = files("missing", &["deck.pdf"]);
+        let deck = dir.join("deck.pdf").display().to_string();
+        let mut cockpit = Cockpit::default();
+        let id = cockpit.add(Sheet::Signals, day());
+        cockpit.attach(Sheet::Signals, id, &deck).unwrap();
+        std::fs::remove_file(dir.join("deck.pdf")).unwrap();
+        let listed = cockpit.row(Sheet::Signals, id).unwrap().attachments();
+        assert_eq!(listed.len(), 1, "kept on the line");
+        assert!(!listed[0].exists);
+        assert_eq!(listed[0].name, "deck.pdf");
+        cockpit.detach(Sheet::Signals, id, "deck.pdf").unwrap();
+        assert!(cockpit.signals[0].attachments.is_empty());
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn a_line_without_attachments_saves_as_before() {
+        let mut cockpit = Cockpit::default();
+        cockpit.add_with(Sheet::Goals, &[("goal", "Ship")]);
+        let json = serde_json::to_string(&cockpit).unwrap();
+        assert!(!json.contains("attachments"), "{json}");
+        let old = r#"{"goals":[{"id":1,"cells":{"goal":"Ship"}}]}"#;
+        let read: Cockpit = serde_json::from_str(old).unwrap();
+        assert!(read.goals[0].attachments.is_empty());
     }
 }
